@@ -71,7 +71,7 @@ import {
   CurriculumPhaseKey,
   generateGradesForCurriculumPhase
 } from '../data/kurikulumMerdekaPresets';
-import { syncStudent } from '../services/firestoreSync';
+import { syncStudent, deleteStudentDoc } from '../services/firestoreSync';
 
 export interface ToastMessage {
   id: string;
@@ -143,6 +143,7 @@ interface AppContextType {
   addTP: (tp: Omit<TujuanPembelajaran, 'id'>) => void;
   updateTP: (id: string, updated: Partial<TujuanPembelajaran>) => void;
   deleteTP: (id: string) => void;
+  bulkImportTP: (tps: TujuanPembelajaran[], mode?: 'append' | 'replace') => void;
   getTPBySubject: (mapelId: string) => TujuanPembelajaran[];
   resetTPToDefault: () => void;
   applyCurriculumPhasePreset: (
@@ -173,6 +174,7 @@ interface AppContextType {
   grades: GradeRecord[];
   saveGrade: (siswaId: string, mapelId: string, jenis: AssessmentType, nilai: number, capaianKompetensi?: string) => void;
   bulkSaveGrades: (newGrades: Array<{ siswaId: string; mapelId: string; jenis: AssessmentType; nilai: number; capaianKompetensi?: string }>) => void;
+  bulkImportGrades: (newGrades: GradeRecord[], mode?: 'append' | 'replace') => void;
   getStudentGradeSummary: (siswaId: string, mapelId: string) => {
     formatifAvg: number;
     sumatifSts: number;
@@ -1097,10 +1099,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     ]);
 
     addToast('success', 'Siswa Ditambahkan', `${newStudent.nama} berhasil didaftarkan ke Kelas.`);
+    syncStudent(newStudent).catch(err => console.warn('[Firestore] Sync student warning:', err));
   };
 
   const updateStudent = (id: string, updated: Partial<Student>) => {
-    setStudents(prev => prev.map(s => s.id === id ? { ...s, ...updated } : s));
+    setStudents(prev => {
+      const next = prev.map(s => s.id === id ? { ...s, ...updated } : s);
+      const target = next.find(s => s.id === id);
+      if (target) {
+        syncStudent(target).catch(err => console.warn('[Firestore] Sync student update warning:', err));
+      }
+      return next;
+    });
     addToast('success', 'Data Diperbarui', 'Data biodata siswa berhasil disimpan.');
   };
 
@@ -1122,6 +1132,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       siswaIds: d.siswaIds.filter(sId => sId !== id),
       ketuaPiket: d.ketuaPiket === id ? '' : d.ketuaPiket
     })));
+    deleteStudentDoc(id).catch(err => console.warn('[Firestore] Delete student doc warning:', err));
     addToast('warning', 'Siswa Dihapus', `Data ${s?.nama || 'Siswa'} telah dihapus dari kelas.`);
   };
 
@@ -1407,6 +1418,35 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     addToast('warning', 'TP Dihapus', `${target?.kode || 'Tujuan Pembelajaran'} telah dihapus.`);
   };
 
+  const bulkImportTP = (importedTPs: TujuanPembelajaran[], mode: 'append' | 'replace' = 'append') => {
+    if (!importedTPs || importedTPs.length === 0) return;
+    setTujuanPembelajaranList(prev => {
+      let finalTPs: TujuanPembelajaran[];
+      if (mode === 'replace') {
+        finalTPs = [...importedTPs];
+      } else {
+        const tpMap = new Map<string, TujuanPembelajaran>();
+        (prev || []).forEach(tp => {
+          const key = `${tp.mapelId}_${(tp.kode || '').trim().toLowerCase()}`;
+          tpMap.set(key, tp);
+        });
+        importedTPs.forEach(tp => {
+          const key = `${tp.mapelId}_${(tp.kode || '').trim().toLowerCase()}`;
+          tpMap.set(key, tp);
+        });
+        finalTPs = Array.from(tpMap.values());
+      }
+      localStorage.setItem(STORAGE_PREFIX + 'tujuanPembelajaran', JSON.stringify(finalTPs));
+      return finalTPs;
+    });
+
+    addToast(
+      'success',
+      'Tujuan Pembelajaran (TP) Diimpor',
+      `Berhasil memproses ${importedTPs.length} TP ke daftar capaian kompetensi mata pelajaran.`
+    );
+  };
+
   const getTPBySubject = (mapelId: string) => {
     return tujuanPembelajaranList.filter(tp => tp.mapelId === mapelId);
   };
@@ -1592,6 +1632,35 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       saveGrade(g.siswaId, g.mapelId, g.jenis, g.nilai, g.capaianKompetensi);
     });
     addToast('success', 'Nilai Disimpan', `${newGrades.length} data nilai berhasil diperbarui.`);
+  };
+
+  const bulkImportGrades = (importedGrades: GradeRecord[], mode: 'append' | 'replace' = 'append') => {
+    if (!importedGrades || importedGrades.length === 0) return;
+    setGrades(prev => {
+      let finalGrades: GradeRecord[];
+      if (mode === 'replace') {
+        finalGrades = [...importedGrades];
+      } else {
+        const gradeMap = new Map<string, GradeRecord>();
+        (prev || []).forEach(g => {
+          const key = `${g.siswaId}_${g.mapelId}_${g.jenis}`;
+          gradeMap.set(key, g);
+        });
+        importedGrades.forEach(g => {
+          const key = `${g.siswaId}_${g.mapelId}_${g.jenis}`;
+          gradeMap.set(key, g);
+        });
+        finalGrades = Array.from(gradeMap.values());
+      }
+      localStorage.setItem(STORAGE_PREFIX + 'grades', JSON.stringify(finalGrades));
+      return finalGrades;
+    });
+
+    addToast(
+      'success',
+      'Nilai Siswa Berhasil Diimpor',
+      `Berhasil menyimpan ${importedGrades.length} butir penilaian ke Daftar Nilai.`
+    );
   };
 
   const getStudentGradeSummary = (siswaId: string, mapelId: string) => {
@@ -2661,6 +2730,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         addTP,
         updateTP,
         deleteTP,
+        bulkImportTP,
         getTPBySubject,
         resetTPToDefault,
         applyCurriculumPhasePreset,
@@ -2673,6 +2743,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         grades,
         saveGrade,
         bulkSaveGrades,
+        bulkImportGrades,
         getStudentGradeSummary,
         getAllGradesForStudent,
         getAllMidSemesterGradesForStudent,

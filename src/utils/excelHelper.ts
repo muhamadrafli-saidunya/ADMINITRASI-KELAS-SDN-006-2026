@@ -5,6 +5,7 @@ import {
   Subject,
   TujuanPembelajaran,
   GradeRecord,
+  AssessmentType,
   AttendanceRecord,
   ScheduleItem,
   CashTransaction,
@@ -239,78 +240,178 @@ export function generateTeacherTemplate(): XLSX.WorkBook {
   return wb;
 }
 
-// 3. TEMPLATE DAFTAR NILAI SISWA
-export function generateGradeTemplate(students: Student[], subjects: Subject[]): XLSX.WorkBook {
+// 3. TEMPLATE DAFTAR NILAI & ASESMEN KURIKULUM MERDEKA
+export function generateGradeTemplate(
+  students: Student[],
+  subjects: Subject[],
+  activeSubjectId?: string,
+  currentTPs?: TujuanPembelajaran[]
+): XLSX.WorkBook {
   const wb = XLSX.utils.book_new();
 
-  // We can create a sheet per subject or a combined master sheet
+  const primarySubject = (activeSubjectId ? subjects.find(s => s.id === activeSubjectId) : null)
+    || subjects.find(s => s.kode === 'PAI')
+    || subjects[0]
+    || {
+      id: 's1',
+      kode: 'PAI',
+      nama: 'Pendidikan Agama & Budi Pekerti',
+      kktp: 75,
+      guruPengampu: 'Guru Pengampu'
+    };
+
+  // Check if subject has specific TPs
+  const subjectTPs = (currentTPs || []).filter(tp => tp.mapelId === primarySubject.id);
+  const tpCount = Math.max(4, subjectTPs.length || 4);
+
+  // Sheet 1: Nilai_Siswa
   const headers = [
     'No Absen',
     'NISN',
     'Nama Siswa',
     'Kode Mapel',
-    'Nama Mata Pelajaran',
-    'Formatif TP 1',
-    'Formatif TP 2',
-    'Formatif TP 3',
-    'Formatif TP 4',
-    'Sumatif Tengah Sem (STS)',
-    'Sumatif Akhir Sem (SAS)'
+    'Nama Mata Pelajaran'
   ];
 
-  const sampleRows: any[] = [];
-  
+  for (let i = 1; i <= tpCount; i++) {
+    headers.push(`Formatif TP ${i}`);
+  }
+  headers.push('Sumatif Tengah Sem (STS)');
+  headers.push('Sumatif Akhir Sem (SAS)');
+
   const targetStudents = students.length > 0 ? students : [
     { id: '1', nomorAbsen: 1, nisn: '0123456789', nama: 'Ahmad Fadilah' } as Student,
     { id: '2', nomorAbsen: 2, nisn: '0123456790', nama: 'Aisyah Putri Azzahra' } as Student,
     { id: '3', nomorAbsen: 3, nisn: '0123456791', nama: 'Budi Santoso' } as Student
   ];
 
-  const primarySubject = subjects.find(s => s.kode === 'PAI') || subjects[0] || {
-    id: 's1',
-    kode: 'PAI',
-    nama: 'Pendidikan Agama & Budi Pekerti'
-  };
-
-  targetStudents.forEach((s) => {
-    sampleRows.push([
-      s.nomorAbsen || 1,
+  const sampleRows = targetStudents.map((s, idx) => {
+    const row: any[] = [
+      s.nomorAbsen || idx + 1,
       s.nisn,
       s.nama,
       primarySubject.kode,
-      primarySubject.nama,
-      85,
-      88,
-      82,
-      90,
-      86,
-      88
-    ]);
+      primarySubject.nama
+    ];
+    // Add sample scores between 80 - 92
+    for (let i = 1; i <= tpCount; i++) {
+      row.push(80 + ((idx + i) % 15));
+    }
+    row.push(85);
+    row.push(88);
+    return row;
   });
 
   const ws = XLSX.utils.aoa_to_sheet([headers, ...sampleRows]);
-  ws['!cols'] = [
+  const cols = [
     { wch: 10 }, // No Absen
-    { wch: 15 }, // NISN
+    { wch: 16 }, // NISN
     { wch: 28 }, // Nama
     { wch: 14 }, // Kode Mapel
-    { wch: 32 }, // Nama Mapel
-    { wch: 15 }, // TP 1
-    { wch: 15 }, // TP 2
-    { wch: 15 }, // TP 3
-    { wch: 15 }, // TP 4
-    { wch: 24 }, // STS
-    { wch: 24 }  // SAS
+    { wch: 32 }  // Nama Mapel
   ];
+  for (let i = 1; i <= tpCount; i++) {
+    cols.push({ wch: 15 });
+  }
+  cols.push({ wch: 24 }); // STS
+  cols.push({ wch: 24 }); // SAS
+  ws['!cols'] = cols;
 
   XLSX.utils.book_append_sheet(wb, ws, 'Nilai_Siswa');
 
-  // Sheet Daftar Kode Mapel
+  // Sheet 2: Tujuan_Pembelajaran (TP Definitions)
+  const tpHeaders = [
+    'Kode Mapel',
+    'Nama Mata Pelajaran',
+    'Kode TP',
+    'Lingkup Materi / Bab',
+    'Deskripsi Rumusan Tujuan Pembelajaran',
+    'Semester',
+    'KKTP',
+    'Ringkasan Rapor Saat Tercapai',
+    'Ringkasan Rapor Saat Perlu Bimbingan'
+  ];
+
+  const relevantTPs = (currentTPs && currentTPs.length > 0)
+    ? (activeSubjectId ? currentTPs.filter(t => t.mapelId === activeSubjectId) : currentTPs)
+    : [
+        {
+          kode: 'TP 1',
+          lingkupMateri: 'Bab 1: Konsep Dasar & Nilai',
+          deskripsi: `Peserta didik memahami konsep esensial pada mata pelajaran ${primarySubject.nama}.`,
+          semester: '1 (Ganjil)',
+          kktp: primarySubject.kktp || 75,
+          ringkasanRaporTuntas: 'Menunjukkan penguasaan sangat baik dalam memahami konsep dasar.',
+          ringkasanRaporPerluBimbingan: 'Perlu pendampingan dalam memahami konsep materi.'
+        },
+        {
+          kode: 'TP 2',
+          lingkupMateri: 'Bab 2: Penerapan & Eksplorasi',
+          deskripsi: `Peserta didik mampu menerapkan dan menganalisis materi ${primarySubject.nama} secara mandiri.`,
+          semester: '1 (Ganjil)',
+          kktp: primarySubject.kktp || 75,
+          ringkasanRaporTuntas: 'Sangat terampil dalam menerapkan materi dalam kehidupan nyata.',
+          ringkasanRaporPerluBimbingan: 'Perlu bimbingan dalam penerapan konsep materi.'
+        }
+      ];
+
+  const tpRows = relevantTPs.map(tp => {
+    const s = subjects.find(sub => sub.id === (tp as any).mapelId) || primarySubject;
+    return [
+      s.kode,
+      s.nama,
+      tp.kode,
+      tp.lingkupMateri,
+      tp.deskripsi,
+      tp.semester,
+      tp.kktp || s.kktp || 75,
+      tp.ringkasanRaporTuntas || '',
+      tp.ringkasanRaporPerluBimbingan || ''
+    ];
+  });
+
+  const wsTP = XLSX.utils.aoa_to_sheet([tpHeaders, ...tpRows]);
+  wsTP['!cols'] = [
+    { wch: 14 },
+    { wch: 32 },
+    { wch: 14 },
+    { wch: 28 },
+    { wch: 45 },
+    { wch: 18 },
+    { wch: 12 },
+    { wch: 38 },
+    { wch: 38 }
+  ];
+  XLSX.utils.book_append_sheet(wb, wsTP, 'Tujuan_Pembelajaran');
+
+  // Sheet 3: Daftar_Mata_Pelajaran
   const mapelHeaders = ['Kode Mapel', 'Nama Mata Pelajaran', 'KKTP (Target Minimal)', 'Guru Pengampu'];
   const mapelRows = subjects.map(s => [s.kode, s.nama, s.kktp, s.guruPengampu]);
   const wsMapel = XLSX.utils.aoa_to_sheet([mapelHeaders, ...mapelRows]);
   wsMapel['!cols'] = [{ wch: 15 }, { wch: 35 }, { wch: 22 }, { wch: 25 }];
   XLSX.utils.book_append_sheet(wb, wsMapel, 'Daftar_Mata_Pelajaran');
+
+  // Sheet 4: Petunjuk_Pengisian
+  const petunjukRows = [
+    ['PANDUAN PENGISIAN TEMPLATE NILAI & TP KURIKULUM MERDEKA'],
+    [''],
+    ['1. Lembar "Nilai_Siswa":'],
+    ['   - Isikan nomor absen, NISN, nama siswa, kode mapel, dan nama mata pelajaran.'],
+    ['   - Masukkan nilai angka (0 - 100) pada kolom Formatif TP 1, Formatif TP 2, dst., STS, dan SAS.'],
+    ['   - Sistem otomatis mengenali kolom jika menggunakan nama: Formatif TP 1 / TP 1 / TP1 / STS / SAS.'],
+    [''],
+    ['2. Lembar "Tujuan_Pembelajaran":'],
+    ['   - Anda dapat merumuskan atau mengubah Tujuan Pembelajaran (TP) pada lembar ini.'],
+    ['   - Kode Mapel harus sesuai dengan daftar mata pelajaran pada sheet Daftar_Mata_Pelajaran.'],
+    ['   - Saat file ini diunggah, nilai akan otomatis masuk ke Daftar Nilai dan TP akan otomatis masuk ke Tujuan Pembelajaran.'],
+    [''],
+    ['3. Keamanan & Sinkronisasi:'],
+    ['   - Pastikan format file disimpan sebagai format Excel (.xlsx).'],
+    ['   - Nilai dan TP akan otomatis tersimpan dan disinkronkan ke sistem.']
+  ];
+  const wsPetunjuk = XLSX.utils.aoa_to_sheet(petunjukRows);
+  wsPetunjuk['!cols'] = [{ wch: 90 }];
+  XLSX.utils.book_append_sheet(wb, wsPetunjuk, 'Petunjuk_Pengisian');
 
   return wb;
 }
@@ -476,7 +577,11 @@ export function generateScheduleTemplate(subjects: Subject[]): XLSX.WorkBook {
 }
 
 // 8. TEMPLATE TUJUAN PEMBELAJARAN (TP)
-export function generateTPTemplate(subjects: Subject[]): XLSX.WorkBook {
+export function generateTPTemplate(
+  subjects: Subject[],
+  activeSubjectId?: string,
+  existingTPs?: TujuanPembelajaran[]
+): XLSX.WorkBook {
   const wb = XLSX.utils.book_new();
 
   const headers = [
@@ -491,30 +596,64 @@ export function generateTPTemplate(subjects: Subject[]): XLSX.WorkBook {
     'Ringkasan Rapor Saat Perlu Bimbingan'
   ];
 
-  const sampleRows = [
-    [
-      'PAI',
-      'Pendidikan Agama & Budi Pekerti',
-      'TP 1',
-      'Bab 1: Meneladani Asmaulhusna',
-      'Peserta didik dapat memahami dan meneladani makna Asmaulhusna Al-Malik, Al-Aziz, Al-Quddus dalam kehidupan sehari-hari.',
-      '1 (Ganjil)',
-      75,
-      'Menunjukkan penguasaan sangat baik dalam memahami makna Asmaulhusna.',
-      'Perlu bimbingan dalam menghafal dan menerapkan perilaku Asmaulhusna.'
-    ],
-    [
-      'BIN',
-      'Bahasa Indonesia',
-      'TP 1',
-      'Bab 1: Sudah Besar',
-      'Peserta didik mampu mengidentifikasi ide pokok dan ide pendukung pada teks narasi yang dibaca.',
-      '1 (Ganjil)',
-      75,
-      'Sangat terampil dalam menemukan ide pokok teks narasi secara mandiri.',
-      'Perlu bimbingan dalam membedakan ide pokok dan ide pendukung.'
-    ]
-  ];
+  let sampleRows: any[] = [];
+  const targetTPs = (existingTPs && existingTPs.length > 0)
+    ? (activeSubjectId ? existingTPs.filter(t => t.mapelId === activeSubjectId) : existingTPs)
+    : [];
+
+  if (targetTPs.length > 0) {
+    sampleRows = targetTPs.map(tp => {
+      const s = subjects.find(sub => sub.id === tp.mapelId);
+      return [
+        s?.kode || 'UMUM',
+        s?.nama || 'Mata Pelajaran',
+        tp.kode,
+        tp.lingkupMateri,
+        tp.deskripsi,
+        tp.semester,
+        tp.kktp || s?.kktp || 75,
+        tp.ringkasanRaporTuntas || '',
+        tp.ringkasanRaporPerluBimbingan || ''
+      ];
+    });
+  } else {
+    const primarySubject = (activeSubjectId ? subjects.find(s => s.id === activeSubjectId) : null) || subjects[0];
+    sampleRows = [
+      [
+        primarySubject?.kode || 'PAI',
+        primarySubject?.nama || 'Pendidikan Agama & Budi Pekerti',
+        'TP 1',
+        'Bab 1: Meneladani Asmaulhusna',
+        'Peserta didik dapat memahami dan meneladani makna Asmaulhusna Al-Malik, Al-Aziz, Al-Quddus dalam kehidupan sehari-hari.',
+        '1 (Ganjil)',
+        primarySubject?.kktp || 75,
+        'Menunjukkan penguasaan sangat baik dalam memahami makna Asmaulhusna.',
+        'Perlu bimbingan dalam menghafal dan menerapkan perilaku Asmaulhusna.'
+      ],
+      [
+        primarySubject?.kode || 'PAI',
+        primarySubject?.nama || 'Pendidikan Agama & Budi Pekerti',
+        'TP 2',
+        'Bab 2: Mengenal Kitab-Kitab Allah',
+        'Peserta didik mampu mengenal kitab-kitab suci yang diturunkan Allah Swt. dan para rasul penerimanya dengan benar.',
+        '1 (Ganjil)',
+        primarySubject?.kktp || 75,
+        'Sangat terampil dalam menyebutkan nama-nama kitab suci dan rasul penerimanya.',
+        'Perlu bimbingan dalam memahami fungsi kitab suci bagi umat manusia.'
+      ],
+      [
+        'BIN',
+        'Bahasa Indonesia',
+        'TP 1',
+        'Bab 1: Sudah Besar',
+        'Peserta didik mampu mengidentifikasi ide pokok dan ide pendukung pada teks narasi yang dibaca.',
+        '1 (Ganjil)',
+        75,
+        'Sangat terampil dalam menemukan ide pokok teks narasi secara mandiri.',
+        'Perlu bimbingan dalam membedakan ide pokok dan ide pendukung.'
+      ]
+    ];
+  }
 
   const ws = XLSX.utils.aoa_to_sheet([headers, ...sampleRows]);
   ws['!cols'] = [
@@ -530,6 +669,14 @@ export function generateTPTemplate(subjects: Subject[]): XLSX.WorkBook {
   ];
 
   XLSX.utils.book_append_sheet(wb, ws, 'Tujuan_Pembelajaran');
+
+  // Sheet 2: Daftar_Mata_Pelajaran
+  const mapelHeaders = ['Kode Mapel', 'Nama Mata Pelajaran', 'KKTP (Target Minimal)', 'Guru Pengampu'];
+  const mapelRows = subjects.map(s => [s.kode, s.nama, s.kktp, s.guruPengampu]);
+  const wsMapel = XLSX.utils.aoa_to_sheet([mapelHeaders, ...mapelRows]);
+  wsMapel['!cols'] = [{ wch: 15 }, { wch: 35 }, { wch: 22 }, { wch: 25 }];
+  XLSX.utils.book_append_sheet(wb, wsMapel, 'Daftar_Mata_Pelajaran');
+
   return wb;
 }
 
@@ -1062,79 +1209,446 @@ export function parseTeachersFromSheet(ws: XLSX.WorkSheet): ParsedExcelResult<Pa
   };
 }
 
-// Parse Grades from Sheet
+// Helper to find worksheet containing grades
+export function findGradeWorksheet(wb: XLSX.WorkBook): { sheetName: string; ws: XLSX.WorkSheet } | null {
+  if (!wb || !wb.SheetNames || wb.SheetNames.length === 0) return null;
+
+  // 1. Direct name match
+  const candidateNames = wb.SheetNames.filter(name =>
+    /nilai|grade|penilaian|asesmen|leger/i.test(name) && !/tujuan|tp/i.test(name)
+  );
+  if (candidateNames.length > 0) {
+    return { sheetName: candidateNames[0], ws: wb.Sheets[candidateNames[0]] };
+  }
+
+  // 2. Scan sheet contents for grade headers
+  for (const sheetName of wb.SheetNames) {
+    const ws = wb.Sheets[sheetName];
+    if (!ws) continue;
+    const aoa: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    for (let r = 0; r < Math.min(10, aoa.length); r++) {
+      const row = aoa[r];
+      if (!Array.isArray(row)) continue;
+      const cells = row.map(c => String(c || '').toLowerCase());
+      const hasStudentId = cells.some(c => c.includes('nisn') || c.includes('nama') || c.includes('absen'));
+      const hasAssessment = cells.some(c => c.includes('formatif') || c.includes('tp 1') || c.includes('tp1') || c.includes('sts') || c.includes('sas') || c.includes('nilai'));
+      if (hasStudentId && hasAssessment) {
+        return { sheetName, ws };
+      }
+    }
+  }
+
+  // Fallback to first sheet
+  const first = wb.SheetNames[0];
+  return first ? { sheetName: first, ws: wb.Sheets[first] } : null;
+}
+
+// Helper to find worksheet containing Tujuan Pembelajaran (TP)
+export function findTPWorksheet(wb: XLSX.WorkBook): { sheetName: string; ws: XLSX.WorkSheet } | null {
+  if (!wb || !wb.SheetNames || wb.SheetNames.length === 0) return null;
+
+  // 1. Direct name match
+  const candidateNames = wb.SheetNames.filter(name =>
+    /tujuan.*pembelajaran|daftar.*tp|^tp$|rumusan.*tp|capaian.*tp/i.test(name)
+  );
+  if (candidateNames.length > 0) {
+    return { sheetName: candidateNames[0], ws: wb.Sheets[candidateNames[0]] };
+  }
+
+  // 2. Scan sheet contents
+  for (const sheetName of wb.SheetNames) {
+    const ws = wb.Sheets[sheetName];
+    if (!ws) continue;
+    const aoa: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    for (let r = 0; r < Math.min(10, aoa.length); r++) {
+      const row = aoa[r];
+      if (!Array.isArray(row)) continue;
+      const cells = row.map(c => String(c || '').toLowerCase());
+      const hasTP = cells.some(c => c.includes('tujuan pembelajaran') || c.includes('lingkup materi') || c.includes('kode tp'));
+      if (hasTP) {
+        return { sheetName, ws };
+      }
+    }
+  }
+
+  return null;
+}
+
+// Parse Grades from Sheet with dynamic column recognition
 export function parseGradesFromSheet(
   ws: XLSX.WorkSheet,
   students: Student[],
-  subjects: Subject[]
+  subjects: Subject[],
+  defaultSubjectId?: string
 ): ParsedExcelResult<GradeRecord> {
-  const rawRows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+  const aoa: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
   const data: GradeRecord[] = [];
   const errors: string[] = [];
 
-  rawRows.forEach((row, idx) => {
-    const rowNum = idx + 2;
-    const nisn = String(row['NISN'] || '').trim();
-    const nama = String(row['Nama Siswa'] || row['Nama'] || '').trim();
-    const kodeMapel = String(row['Kode Mapel'] || row['Kode'] || '').trim().toUpperCase();
+  if (!aoa || aoa.length === 0) {
+    return { data, errors: ['Lembar sheet Excel nilai kosong.'], totalRows: 0, validRows: 0 };
+  }
 
-    // Match student
-    let student = students.find(s => s.nisn === nisn);
+  // Find header row (scan first 10 rows)
+  let headerRowIndex = -1;
+  for (let r = 0; r < Math.min(10, aoa.length); r++) {
+    const row = aoa[r];
+    if (!Array.isArray(row)) continue;
+    const cells = row.map(c => String(c || '').toLowerCase().trim());
+    const hasStudent = cells.some(c => c.includes('nama') || c.includes('nisn') || c.includes('nis') || c.includes('absen'));
+    const hasAssessment = cells.some(c =>
+      c.includes('tp') || c.includes('formatif') || c.includes('sts') || c.includes('sas') || c.includes('sumatif') || c.includes('nilai')
+    );
+    if (hasStudent && hasAssessment) {
+      headerRowIndex = r;
+      break;
+    }
+    if (hasStudent) {
+      headerRowIndex = r;
+      break;
+    }
+  }
+
+  if (headerRowIndex === -1) {
+    headerRowIndex = 0;
+  }
+
+  const rawHeaders: string[] = (aoa[headerRowIndex] || []).map(h => String(h || '').trim());
+  const headerMap = new Map<string, number>();
+  rawHeaders.forEach((h, colIdx) => {
+    if (h) headerMap.set(h.toLowerCase(), colIdx);
+  });
+
+  const findCol = (pattern: RegExp): number => {
+    for (const [key, colIdx] of headerMap.entries()) {
+      if (pattern.test(key)) return colIdx;
+    }
+    return -1;
+  };
+
+  const colNisn = findCol(/nisn/i);
+  const colNis = findCol(/^(nis|nipd|no\.?\s*induk)$/i);
+  const colNama = findCol(/nama.*(siswa|peserta|murid|lengkap)|^(nama|name)$/i);
+  const colKodeMapel = findCol(/kode.*(mapel|pelajaran)|^(kode)$/i);
+  const colNamaMapel = findCol(/nama.*(mapel|pelajaran)|^(mapel|mata\s*pelajaran)$/i);
+
+  // Dynamic assessment columns detection
+  interface DetectedCol {
+    colIdx: number;
+    type: AssessmentType;
+    label: string;
+  }
+  const assessmentCols: DetectedCol[] = [];
+
+  rawHeaders.forEach((header, colIdx) => {
+    const lower = header.toLowerCase().trim();
+    if (!lower) return;
+
+    // Check STS (Sumatif Tengah Semester)
+    if (/sumatif.*tengah|tengah.*sem|\bsts\b|\bpts\b|\bmid\b|\buts\b/i.test(lower)) {
+      assessmentCols.push({ colIdx, type: 'Sumatif_STS', label: header });
+      return;
+    }
+
+    // Check SAS (Sumatif Akhir Semester)
+    if (/sumatif.*akhir|akhir.*sem|\bsas\b|\bpas\b|\bpat\b|\buas\b/i.test(lower)) {
+      assessmentCols.push({ colIdx, type: 'Sumatif_SAS', label: header });
+      return;
+    }
+
+    // Check Formatif TP
+    // Matches: "Formatif TP 1", "Formatif TP1", "TP 1", "TP1", "TP.1", "Formatif 1", "Nilai TP 1"
+    const tpMatch = lower.match(/(?:formatif\s*)?tp[\s\.\-_]*(\d+)/i) || lower.match(/^formatif\s*(\d+)$/i);
+    if (tpMatch) {
+      const tpNum = parseInt(tpMatch[1], 10);
+      if (tpNum >= 1 && tpNum <= 20) {
+        assessmentCols.push({ colIdx, type: `Formatif_TP${tpNum}` as AssessmentType, label: header });
+        return;
+      }
+    }
+  });
+
+  // If no specific assessment columns found, check columns containing "Nilai"
+  if (assessmentCols.length === 0) {
+    rawHeaders.forEach((header, colIdx) => {
+      const lower = header.toLowerCase();
+      if (lower.includes('nilai')) {
+        assessmentCols.push({ colIdx, type: 'Formatif_TP1', label: header });
+      }
+    });
+  }
+
+  const defaultSub = defaultSubjectId
+    ? subjects.find(s => s.id === defaultSubjectId)
+    : subjects[0];
+
+  const dataRows = aoa.slice(headerRowIndex + 1);
+
+  dataRows.forEach((row, rowOffset) => {
+    const actualRowNum = headerRowIndex + rowOffset + 2;
+    if (!Array.isArray(row) || row.length === 0) return;
+    const hasAny = row.some(c => String(c || '').trim() !== '');
+    if (!hasAny) return;
+
+    const getVal = (idx: number): any => (idx >= 0 && idx < row.length ? row[idx] : '');
+
+    const nisn = String(colNisn >= 0 ? getVal(colNisn) : '').replace(/[^0-9]/g, '').trim();
+    const nis = String(colNis >= 0 ? getVal(colNis) : '').replace(/[^0-9]/g, '').trim();
+    const nama = String(colNama >= 0 ? getVal(colNama) : '').trim();
+
+    // Match Student
+    let student: Student | undefined;
+    if (nisn) student = students.find(s => s.nisn === nisn);
+    if (!student && nis) student = students.find(s => s.nis === nis);
     if (!student && nama) {
-      student = students.find(s => s.nama.toLowerCase().includes(nama.toLowerCase()));
+      student = students.find(s => s.nama.toLowerCase() === nama.toLowerCase());
+      if (!student) {
+        student = students.find(s => s.nama.toLowerCase().includes(nama.toLowerCase()) || nama.toLowerCase().includes(s.nama.toLowerCase()));
+      }
     }
 
     if (!student) {
-      errors.push(`Baris ${rowNum}: Siswa dengan NISN "${nisn}" / Nama "${nama}" tidak ditemukan di database.`);
+      errors.push(`Baris ${actualRowNum}: Siswa dengan NISN "${nisn}" / Nama "${nama}" tidak ditemukan di data kelas.`);
       return;
     }
 
-    // Match subject
-    let subject = subjects.find(sub => sub.kode.toUpperCase() === kodeMapel);
-    if (!subject && row['Nama Mata Pelajaran']) {
-      const subjectName = String(row['Nama Mata Pelajaran']).toLowerCase();
-      subject = subjects.find(sub => sub.nama.toLowerCase().includes(subjectName));
+    // Match Subject
+    const kodeMapel = String(colKodeMapel >= 0 ? getVal(colKodeMapel) : '').trim().toUpperCase();
+    const namaMapel = String(colNamaMapel >= 0 ? getVal(colNamaMapel) : '').trim();
+
+    let subject: Subject | undefined;
+    if (kodeMapel) {
+      subject = subjects.find(s => s.kode.toUpperCase() === kodeMapel);
+    }
+    if (!subject && namaMapel) {
+      subject = subjects.find(s => s.nama.toLowerCase().includes(namaMapel.toLowerCase()) || namaMapel.toLowerCase().includes(s.nama.toLowerCase()));
+    }
+    if (!subject) {
+      subject = defaultSub || subjects[0];
     }
 
     if (!subject) {
-      errors.push(`Baris ${rowNum}: Mata pelajaran "${kodeMapel || row['Nama Mata Pelajaran']}" tidak dikenali.`);
+      errors.push(`Baris ${actualRowNum}: Mata pelajaran tidak dapat ditentukan.`);
       return;
     }
 
-    // Extract grades
-    const formatifTypes = [
-      { key: 'Formatif TP 1', type: 'Formatif_TP1' },
-      { key: 'Formatif TP 2', type: 'Formatif_TP2' },
-      { key: 'Formatif TP 3', type: 'Formatif_TP3' },
-      { key: 'Formatif TP 4', type: 'Formatif_TP4' },
-      { key: 'Sumatif Tengah Sem (STS)', type: 'Sumatif_STS' },
-      { key: 'Sumatif Akhir Sem (SAS)', type: 'Sumatif_SAS' }
-    ] as const;
+    // Extract each assessment grade
+    assessmentCols.forEach(({ colIdx, type }) => {
+      const rawVal = getVal(colIdx);
+      if (rawVal === undefined || rawVal === null || String(rawVal).trim() === '') return;
 
-    formatifTypes.forEach(({ key, type }) => {
-      const val = row[key];
-      if (val !== undefined && val !== '' && !isNaN(Number(val))) {
-        const score = Math.min(100, Math.max(0, Number(val)));
-        data.push({
-          id: `g_${student!.id}_${subject!.id}_${type}`,
-          siswaId: student!.id,
-          mapelId: subject!.id,
-          jenis: type as any,
-          nilai: score,
-          capaianKompetensi: score >= (subject!.kktp || 75)
-            ? 'Menunjukkan penguasaan yang sangat baik dalam materi.'
-            : 'Perlu bimbingan dan pendampingan lebih lanjut.'
-        });
-      }
+      const numVal = Number(String(rawVal).replace(',', '.').replace(/[^0-9.]/g, ''));
+      if (isNaN(numVal)) return;
+
+      const score = Math.min(100, Math.max(0, Math.round(numVal)));
+      const kktp = subject!.kktp || 75;
+
+      const safeStudentId = student!.id.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const safeSubjectId = subject!.id.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const safeJenis = String(type).replace(/[^a-zA-Z0-9_-]/g, '_');
+
+      data.push({
+        id: `grd_${safeStudentId}_${safeSubjectId}_${safeJenis}`,
+        siswaId: student!.id,
+        mapelId: subject!.id,
+        jenis: type,
+        nilai: score,
+        capaianKompetensi: score >= kktp
+          ? 'Menunjukkan penguasaan sangat baik dalam mencapai tujuan pembelajaran.'
+          : 'Perlu bimbingan dan pendampingan intensif dalam mencapai tujuan pembelajaran.'
+      });
     });
   });
 
   return {
     data,
     errors,
-    totalRows: rawRows.length,
+    totalRows: dataRows.length,
     validRows: data.length
   };
+}
+
+// Parse Tujuan Pembelajaran (TP) from Sheet
+export function parseTPFromSheet(
+  ws: XLSX.WorkSheet,
+  subjects: Subject[],
+  defaultSubjectId?: string
+): ParsedExcelResult<TujuanPembelajaran> {
+  const aoa: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+  const data: TujuanPembelajaran[] = [];
+  const errors: string[] = [];
+
+  if (!aoa || aoa.length === 0) {
+    return { data, errors: ['Lembar sheet TP kosong.'], totalRows: 0, validRows: 0 };
+  }
+
+  // Find header row (scan first 10 rows)
+  let headerRowIndex = -1;
+  for (let r = 0; r < Math.min(10, aoa.length); r++) {
+    const row = aoa[r];
+    if (!Array.isArray(row)) continue;
+    const cells = row.map(c => String(c || '').toLowerCase().trim());
+    const hasTP = cells.some(c =>
+      c.includes('tujuan') || c.includes('materi') || c.includes('kode tp') || c.includes('rumusan') || c.includes('kktp')
+    );
+    if (hasTP) {
+      headerRowIndex = r;
+      break;
+    }
+  }
+
+  if (headerRowIndex === -1) {
+    headerRowIndex = 0;
+  }
+
+  const rawHeaders: string[] = (aoa[headerRowIndex] || []).map(h => String(h || '').trim());
+  const headerMap = new Map<string, number>();
+  rawHeaders.forEach((h, colIdx) => {
+    if (h) headerMap.set(h.toLowerCase(), colIdx);
+  });
+
+  const findCol = (pattern: RegExp): number => {
+    for (const [key, colIdx] of headerMap.entries()) {
+      if (pattern.test(key)) return colIdx;
+    }
+    return -1;
+  };
+
+  const colKodeMapel = findCol(/kode.*(mapel|pelajaran)|^(kode)$/i);
+  const colNamaMapel = findCol(/nama.*(mapel|pelajaran)|^(mapel|mata\s*pelajaran)$/i);
+  const colKodeTP = findCol(/kode.*tp|^tp$|no.*tp|nomor.*tp/i);
+  const colMateri = findCol(/lingkup.*materi|materi|bab|topik|kompetensi/i);
+  const colDeskripsi = findCol(/deskripsi|rumusan.*tp|rumusan.*tujuan|tujuan.*pembelajaran/i);
+  const colSemester = findCol(/semester|sem/i);
+  const colKKTP = findCol(/kktp|kkm|target/i);
+  const colTuntas = findCol(/tercapai|tuntas|ringkasan.*tuntas/i);
+  const colBimbingan = findCol(/bimbingan|perlu.*bimbingan|ringkasan.*bimbingan/i);
+
+  const defaultSub = defaultSubjectId ? subjects.find(s => s.id === defaultSubjectId) : subjects[0];
+  const dataRows = aoa.slice(headerRowIndex + 1);
+
+  dataRows.forEach((row, rowOffset) => {
+    const actualRowNum = headerRowIndex + rowOffset + 2;
+    if (!Array.isArray(row) || row.length === 0) return;
+    const hasAny = row.some(c => String(c || '').trim() !== '');
+    if (!hasAny) return;
+
+    const getVal = (idx: number): any => (idx >= 0 && idx < row.length ? row[idx] : '');
+
+    // Match Subject
+    const kodeMapel = String(colKodeMapel >= 0 ? getVal(colKodeMapel) : '').trim().toUpperCase();
+    const namaMapel = String(colNamaMapel >= 0 ? getVal(colNamaMapel) : '').trim();
+
+    let subject: Subject | undefined;
+    if (kodeMapel) {
+      subject = subjects.find(s => s.kode.toUpperCase() === kodeMapel);
+    }
+    if (!subject && namaMapel) {
+      subject = subjects.find(s => s.nama.toLowerCase().includes(namaMapel.toLowerCase()) || namaMapel.toLowerCase().includes(s.nama.toLowerCase()));
+    }
+    if (!subject) {
+      subject = defaultSub || subjects[0];
+    }
+
+    if (!subject) {
+      errors.push(`Baris ${actualRowNum}: Mata pelajaran tidak dapat ditentukan.`);
+      return;
+    }
+
+    let kodeTP = String(colKodeTP >= 0 ? getVal(colKodeTP) : '').trim();
+    if (!kodeTP) {
+      kodeTP = `TP ${data.length + 1}`;
+    }
+    if (!/^tp/i.test(kodeTP) && !isNaN(Number(kodeTP))) {
+      kodeTP = `TP ${kodeTP}`;
+    }
+
+    const lingkupMateri = String(colMateri >= 0 ? getVal(colMateri) : '').trim()
+      || `Lingkup Materi ${kodeTP}`;
+    
+    const deskripsi = String(colDeskripsi >= 0 ? getVal(colDeskripsi) : '').trim()
+      || `Peserta didik mampu memahami dan menerapkan kompetensi ${lingkupMateri} pada mata pelajaran ${subject.nama}.`;
+
+    const rawSemester = String(colSemester >= 0 ? getVal(colSemester) : '1').toLowerCase();
+    let semester: '1 (Ganjil)' | '2 (Genap)' | 'Semua' = '1 (Ganjil)';
+    if (rawSemester.includes('2') || rawSemester.includes('genap')) {
+      semester = '2 (Genap)';
+    } else if (rawSemester.includes('semua') || rawSemester.includes('all')) {
+      semester = 'Semua';
+    }
+
+    const rawKKTP = colKKTP >= 0 ? Number(String(getVal(colKKTP)).replace(/[^0-9]/g, '')) : NaN;
+    const kktp = (!isNaN(rawKKTP) && rawKKTP > 0) ? rawKKTP : (subject.kktp || 75);
+
+    const ringkasanRaporTuntas = String(colTuntas >= 0 ? getVal(colTuntas) : '').trim()
+      || `Menunjukkan penguasaan sangat baik dalam ${lingkupMateri.toLowerCase()}.`;
+
+    const ringkasanRaporPerluBimbingan = String(colBimbingan >= 0 ? getVal(colBimbingan) : '').trim()
+      || `Perlu pendampingan dalam memahami materi ${lingkupMateri.toLowerCase()}.`;
+
+    const safeMapelCode = subject.kode.toLowerCase().replace(/[^a-z0-9]/g, '_');
+    const safeTPCode = kodeTP.toLowerCase().replace(/[^a-z0-9]/g, '_');
+    const tpId = `tp_${safeMapelCode}_${safeTPCode}_${Date.now().toString().slice(-4)}_${data.length + 1}`;
+
+    data.push({
+      id: tpId,
+      mapelId: subject.id,
+      kode: kodeTP,
+      lingkupMateri,
+      deskripsi,
+      semester,
+      fase: 'Fase B (Kelas 4)',
+      kktp,
+      ringkasanRaporTuntas,
+      ringkasanRaporPerluBimbingan
+    });
+  });
+
+  return {
+    data,
+    errors,
+    totalRows: dataRows.length,
+    validRows: data.length
+  };
+}
+
+// Combined parser: extracts both Grades AND Tujuan Pembelajaran from a workbook if present
+export function parseGradesAndTPFromWorkbook(
+  wb: XLSX.WorkBook,
+  students: Student[],
+  subjects: Subject[],
+  defaultSubjectId?: string
+): {
+  gradesResult: ParsedExcelResult<GradeRecord>;
+  tpResult: ParsedExcelResult<TujuanPembelajaran>;
+} {
+  // Check for grade sheet
+  const gradeSheetFound = findGradeWorksheet(wb);
+  let gradesResult: ParsedExcelResult<GradeRecord> = {
+    data: [],
+    errors: [],
+    totalRows: 0,
+    validRows: 0
+  };
+
+  if (gradeSheetFound) {
+    gradesResult = parseGradesFromSheet(gradeSheetFound.ws, students, subjects, defaultSubjectId);
+  }
+
+  // Check for TP sheet
+  const tpSheetFound = findTPWorksheet(wb);
+  let tpResult: ParsedExcelResult<TujuanPembelajaran> = {
+    data: [],
+    errors: [],
+    totalRows: 0,
+    validRows: 0
+  };
+
+  if (tpSheetFound) {
+    tpResult = parseTPFromSheet(tpSheetFound.ws, subjects, defaultSubjectId);
+  }
+
+  return { gradesResult, tpResult };
 }
 
 // Parse Cash Transactions

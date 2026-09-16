@@ -37,13 +37,16 @@ import {
   exportAllDataToExcel,
   parseExcelFile,
   findStudentWorksheet,
+  findGradeWorksheet,
+  findTPWorksheet,
   parseStudentsFromSheet,
   parseTeachersFromSheet,
   parseGradesFromSheet,
+  parseTPFromSheet,
   parseCashFromSheet,
   parseInventoryFromSheet
 } from '../../utils/excelHelper';
-import { Student, Teacher, GradeRecord, CashTransaction, InventoryItem } from '../../types';
+import { Student, Teacher, GradeRecord, CashTransaction, InventoryItem, TujuanPembelajaran } from '../../types';
 import { syncTeacher, syncGrade, syncTransaction, syncInventoryItem } from '../../services/firestoreSync';
 
 type ImportCategory = 
@@ -69,10 +72,13 @@ export const ImportExcelView: React.FC = () => {
     schoolInfo,
     addToast,
     bulkImportStudents,
+    bulkImportGrades,
+    bulkImportTP,
     setCurrentTab
   } = useApp();
 
   const [activeCategory, setActiveCategory] = useState<ImportCategory>('siswa');
+  const [selectedSubjectId, setSelectedSubjectId] = useState<string>('');
   const [importMode, setImportMode] = useState<'append' | 'replace'>('append');
   const [isParsing, setIsParsing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -81,6 +87,8 @@ export const ImportExcelView: React.FC = () => {
   
   // Parsed Preview States
   const [parsedData, setParsedData] = useState<any[] | null>(null);
+  const [companionTPData, setCompanionTPData] = useState<TujuanPembelajaran[] | null>(null);
+  const [companionGradesData, setCompanionGradesData] = useState<GradeRecord[] | null>(null);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [totalRows, setTotalRows] = useState(0);
   const [validRows, setValidRows] = useState(0);
@@ -174,7 +182,9 @@ export const ImportExcelView: React.FC = () => {
   const handleDownloadTemplate = () => {
     try {
       let wb;
-      let filename = `Template_Import_${activeCategory.toUpperCase()}_SD_Merdeka_${schoolInfo.className.replace(/\s+/g, '_')}.xlsx`;
+      const subObj = subjects.find(s => s.id === selectedSubjectId);
+      const subSuffix = (activeCategory === 'nilai' || activeCategory === 'tp') && subObj ? `_${subObj.kode}` : '';
+      let filename = `Template_Import_${activeCategory.toUpperCase()}${subSuffix}_SD_Merdeka_${schoolInfo.className.replace(/\s+/g, '_')}.xlsx`;
 
       switch (activeCategory) {
         case 'siswa':
@@ -184,7 +194,7 @@ export const ImportExcelView: React.FC = () => {
           wb = generateTeacherTemplate();
           break;
         case 'nilai':
-          wb = generateGradeTemplate(students, subjects);
+          wb = generateGradeTemplate(students, subjects, selectedSubjectId || undefined, tujuanPembelajaranList);
           break;
         case 'presensi':
           wb = generateAttendanceTemplate(students, new Date().toISOString().split('T')[0]);
@@ -199,7 +209,7 @@ export const ImportExcelView: React.FC = () => {
           wb = generateInventoryTemplate();
           break;
         case 'tp':
-          wb = generateTPTemplate(subjects);
+          wb = generateTPTemplate(subjects, selectedSubjectId || undefined, tujuanPembelajaranList);
           break;
         default:
           wb = generateStudentTemplate(subjects);
@@ -248,22 +258,11 @@ export const ImportExcelView: React.FC = () => {
     setIsParsing(true);
     setValidationErrors([]);
     setParsedData(null);
+    setCompanionTPData(null);
+    setCompanionGradesData(null);
 
     try {
       const wb = await parseExcelFile(file);
-      let ws = wb.Sheets[wb.SheetNames[0]];
-
-      // For students, intelligently find sheet named Data_Siswa or containing student columns
-      if (activeCategory === 'siswa') {
-        const found = findStudentWorksheet(wb);
-        if (found) {
-          ws = found.ws;
-        }
-      }
-
-      if (!ws) {
-        throw new Error('Lembar sheet Excel tidak ditemukan atau kosong.');
-      }
 
       let result: { data: any[]; errors: string[]; totalRows: number; validRows: number } = {
         data: [],
@@ -273,17 +272,51 @@ export const ImportExcelView: React.FC = () => {
       };
 
       if (activeCategory === 'siswa') {
+        const found = findStudentWorksheet(wb);
+        const ws = found ? found.ws : wb.Sheets[wb.SheetNames[0]];
+        if (!ws) throw new Error('Lembar sheet Excel Siswa tidak ditemukan.');
         result = parseStudentsFromSheet(ws, schoolInfo.className);
       } else if (activeCategory === 'guru') {
+        const ws = wb.Sheets[wb.SheetNames[0]];
         result = parseTeachersFromSheet(ws);
       } else if (activeCategory === 'nilai') {
-        result = parseGradesFromSheet(ws, students, subjects);
+        // Intelligently find grade worksheet
+        const gradeFound = findGradeWorksheet(wb);
+        const gradeWs = gradeFound ? gradeFound.ws : wb.Sheets[wb.SheetNames[0]];
+        if (!gradeWs) throw new Error('Lembar sheet Nilai tidak ditemukan dalam file Excel.');
+        result = parseGradesFromSheet(gradeWs, students, subjects, selectedSubjectId || undefined);
+
+        // Also check if workbook contains TP sheet
+        const tpFound = findTPWorksheet(wb);
+        if (tpFound && tpFound.ws !== gradeWs) {
+          const tpRes = parseTPFromSheet(tpFound.ws, subjects, selectedSubjectId || undefined);
+          if (tpRes.validRows > 0) {
+            setCompanionTPData(tpRes.data);
+          }
+        }
+      } else if (activeCategory === 'tp') {
+        // Intelligently find TP worksheet
+        const tpFound = findTPWorksheet(wb);
+        const tpWs = tpFound ? tpFound.ws : wb.Sheets[wb.SheetNames[0]];
+        if (!tpWs) throw new Error('Lembar sheet Tujuan Pembelajaran (TP) tidak ditemukan dalam file Excel.');
+        result = parseTPFromSheet(tpWs, subjects, selectedSubjectId || undefined);
+
+        // Also check if workbook contains grade sheet
+        const gradeFound = findGradeWorksheet(wb);
+        if (gradeFound && gradeFound.ws !== tpWs) {
+          const gradeRes = parseGradesFromSheet(gradeFound.ws, students, subjects, selectedSubjectId || undefined);
+          if (gradeRes.validRows > 0) {
+            setCompanionGradesData(gradeRes.data);
+          }
+        }
       } else if (activeCategory === 'kas') {
+        const ws = wb.Sheets[wb.SheetNames[0]];
         result = parseCashFromSheet(ws);
       } else if (activeCategory === 'inventaris') {
+        const ws = wb.Sheets[wb.SheetNames[0]];
         result = parseInventoryFromSheet(ws);
       } else {
-        // General fallback parser
+        const ws = wb.Sheets[wb.SheetNames[0]];
         result = parseStudentsFromSheet(ws, schoolInfo.className);
       }
 
@@ -340,21 +373,14 @@ export const ImportExcelView: React.FC = () => {
           syncTeacher(t).catch(console.error);
         }
       } else if (activeCategory === 'nilai') {
-        const savedGrades = localStorage.getItem('admin_kelas_sd_v1_grades');
-        let currentGrades: GradeRecord[] = savedGrades ? JSON.parse(savedGrades) : grades;
-
-        if (importMode === 'replace') {
-          currentGrades = parsedData as GradeRecord[];
-        } else {
-          const map = new Map<string, GradeRecord>();
-          currentGrades.forEach(g => map.set(`${g.siswaId}_${g.mapelId}_${g.jenis}`, g));
-          (parsedData as GradeRecord[]).forEach(g => map.set(`${g.siswaId}_${g.mapelId}_${g.jenis}`, g));
-          currentGrades = Array.from(map.values());
+        bulkImportGrades(parsedData as GradeRecord[], importMode);
+        if (companionTPData && companionTPData.length > 0) {
+          bulkImportTP(companionTPData, importMode);
         }
-
-        localStorage.setItem('admin_kelas_sd_v1_grades', JSON.stringify(currentGrades));
-        for (const g of parsedData) {
-          syncGrade(g).catch(console.error);
+      } else if (activeCategory === 'tp') {
+        bulkImportTP(parsedData as TujuanPembelajaran[], importMode);
+        if (companionGradesData && companionGradesData.length > 0) {
+          bulkImportGrades(companionGradesData, importMode);
         }
       } else if (activeCategory === 'kas') {
         const savedCash = localStorage.getItem('admin_kelas_sd_v1_transactions');
@@ -511,7 +537,7 @@ export const ImportExcelView: React.FC = () => {
                   Data Berhasil Diimpor ke Sistem!
                 </h3>
                 <p className="text-xs text-emerald-700 dark:text-emerald-300/90 mt-0.5">
-                  Sebanyak <strong>{importSuccessNotice.count}</strong> data {importSuccessNotice.category === 'siswa' ? 'siswa telah berhasil tersimpan ke dalam Data Siswa & Buku Induk' : `telah berhasil tersimpan ke dalam kategori ${importSuccessNotice.category}`}.
+                  Sebanyak <strong>{importSuccessNotice.count}</strong> data {importSuccessNotice.category === 'siswa' ? 'siswa telah berhasil tersimpan ke dalam Data Siswa & Buku Induk' : importSuccessNotice.category === 'nilai' ? 'nilai telah berhasil tersimpan ke Daftar Nilai & Rapor' : importSuccessNotice.category === 'tp' ? 'Tujuan Pembelajaran telah tersimpan ke sistem TP & Asesmen' : `telah berhasil tersimpan ke dalam kategori ${importSuccessNotice.category}`}.
                 </p>
               </div>
             </div>
@@ -522,6 +548,16 @@ export const ImportExcelView: React.FC = () => {
                   className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm transition-all active:scale-95 cursor-pointer"
                 >
                   <span>Buka Data Siswa & Buku Induk</span>
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+              )}
+              {(importSuccessNotice.category === 'nilai' || importSuccessNotice.category === 'tp') && (
+                <button
+                  onClick={() => setCurrentTab('nilai')}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm transition-all active:scale-95 cursor-pointer"
+                >
+                  <GraduationCap className="h-4 w-4" />
+                  <span>Buka Daftar Nilai & TP</span>
                   <ArrowRight className="h-4 w-4" />
                 </button>
               )}
@@ -556,6 +592,29 @@ export const ImportExcelView: React.FC = () => {
               </div>
             </div>
 
+            {(activeCategory === 'nilai' || activeCategory === 'tp') && (
+              <div className="mb-4 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                  Pilih Mata Pelajaran:
+                </label>
+                <select
+                  value={selectedSubjectId}
+                  onChange={(e) => setSelectedSubjectId(e.target.value)}
+                  className="w-full text-xs p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">-- Semua Mata Pelajaran --</option>
+                  {subjects.map(s => (
+                    <option key={s.id} value={s.id}>
+                      {s.kode} - {s.nama} (KKTP: {s.kktp})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                  Template akan memuat format lengkap sesuai mata pelajaran terpilih.
+                </p>
+              </div>
+            )}
+
             <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-300 space-y-2 mb-4">
               <div className="flex items-center gap-2 font-semibold text-slate-800 dark:text-slate-200">
                 <Sparkles className="h-4 w-4 text-amber-500" />
@@ -571,7 +630,7 @@ export const ImportExcelView: React.FC = () => {
 
             <button
               onClick={handleDownloadTemplate}
-              className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md shadow-emerald-600/20 transition-all hover:scale-[1.01] active:scale-[0.99]"
+              className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md shadow-emerald-600/20 transition-all hover:scale-[1.01] active:scale-[0.99] cursor-pointer"
             >
               <Download className="h-4 w-4" />
               <span>Download Template {selectedCategoryObj.title} (.xlsx)</span>
@@ -742,6 +801,35 @@ export const ImportExcelView: React.FC = () => {
                 </div>
               )}
 
+              {/* Companion Notification if file contains both TP and Grades */}
+              {companionTPData && companionTPData.length > 0 && (
+                <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/40 text-emerald-800 dark:text-emerald-300 text-xs flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-emerald-600 shrink-0" />
+                    <span>
+                      <strong>Bonus Terdeteksi:</strong> Ditemukan <strong>{companionTPData.length}</strong> butir Tujuan Pembelajaran (TP) dalam lembar TP. Keduanya akan otomatis tersimpan bersamaan!
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-200 dark:bg-emerald-900 text-emerald-800 dark:text-emerald-200 shrink-0">
+                    Auto-Sync TP & Nilai
+                  </span>
+                </div>
+              )}
+
+              {companionGradesData && companionGradesData.length > 0 && (
+                <div className="p-3 rounded-xl bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800/40 text-purple-800 dark:text-purple-300 text-xs flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-purple-600 shrink-0" />
+                    <span>
+                      <strong>Bonus Terdeteksi:</strong> Ditemukan <strong>{companionGradesData.length}</strong> data Nilai Siswa dalam lembar Nilai. Keduanya akan otomatis tersimpan bersamaan!
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-200 dark:bg-purple-900 text-purple-800 dark:text-purple-200 shrink-0">
+                    Auto-Sync Nilai & TP
+                  </span>
+                </div>
+              )}
+
               {/* Table Preview */}
               <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden max-h-64 overflow-y-auto custom-scrollbar">
                 <table className="w-full text-left text-xs">
@@ -767,10 +855,20 @@ export const ImportExcelView: React.FC = () => {
                       )}
                       {activeCategory === 'nilai' && (
                         <>
-                          <th className="p-2.5">ID Siswa</th>
+                          <th className="p-2.5">NISN</th>
+                          <th className="p-2.5">Nama Siswa</th>
+                          <th className="p-2.5">Mata Pelajaran</th>
+                          <th className="p-2.5">Asesmen</th>
+                          <th className="p-2.5 text-center">Nilai</th>
+                        </>
+                      )}
+                      {activeCategory === 'tp' && (
+                        <>
                           <th className="p-2.5">Mapel</th>
-                          <th className="p-2.5">Jenis</th>
-                          <th className="p-2.5">Nilai</th>
+                          <th className="p-2.5">Kode</th>
+                          <th className="p-2.5">Lingkup Materi</th>
+                          <th className="p-2.5">Rumusan TP</th>
+                          <th className="p-2.5 text-center">KKTP</th>
                         </>
                       )}
                       {activeCategory === 'kas' && (
@@ -818,10 +916,36 @@ export const ImportExcelView: React.FC = () => {
                         )}
                         {activeCategory === 'nilai' && (
                           <>
-                            <td className="p-2.5 font-mono text-[11px]">{row.siswaId}</td>
-                            <td className="p-2.5">{row.mapelId}</td>
-                            <td className="p-2.5 font-semibold text-blue-600">{row.jenis}</td>
-                            <td className="p-2.5 font-bold">{row.nilai}</td>
+                            <td className="p-2.5 font-mono text-[11px]">
+                              {students.find(s => s.id === row.siswaId)?.nisn || '-'}
+                            </td>
+                            <td className="p-2.5 font-bold text-slate-800 dark:text-slate-100">
+                              {students.find(s => s.id === row.siswaId)?.nama || row.siswaId}
+                            </td>
+                            <td className="p-2.5">
+                              {subjects.find(s => s.id === row.mapelId)?.nama || row.mapelId}
+                            </td>
+                            <td className="p-2.5 font-semibold text-blue-600">
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">
+                                {row.jenis}
+                              </span>
+                            </td>
+                            <td className="p-2.5 text-center">
+                              <span className={`font-bold px-2 py-0.5 rounded text-xs ${Number(row.nilai) >= 75 ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300' : 'bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300'}`}>
+                                {row.nilai}
+                              </span>
+                            </td>
+                          </>
+                        )}
+                        {activeCategory === 'tp' && (
+                          <>
+                            <td className="p-2.5 font-bold text-slate-800 dark:text-slate-100">
+                              {subjects.find(s => s.id === row.mapelId)?.nama || row.mapelId}
+                            </td>
+                            <td className="p-2.5 font-mono font-bold text-blue-600">{row.kode}</td>
+                            <td className="p-2.5 text-[11px]">{row.lingkupMateri}</td>
+                            <td className="p-2.5 text-[11px] line-clamp-2 max-w-xs">{row.deskripsi}</td>
+                            <td className="p-2.5 text-center font-bold text-emerald-600">{row.kktp || 75}</td>
                           </>
                         )}
                         {activeCategory === 'kas' && (
