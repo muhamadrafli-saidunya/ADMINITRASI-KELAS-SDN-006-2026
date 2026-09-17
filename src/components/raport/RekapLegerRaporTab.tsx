@@ -425,7 +425,7 @@ export const RekapLegerRaporTab: React.FC<RekapLegerRaporTabProps> = ({
   };
 
   return (
-    <div className="space-y-6">
+    <div className={`space-y-6 ${isPrintLegerOpen ? 'print:hidden' : ''}`}>
       {/* Selector Mode Periode Leger: Akhir Semester vs Mid Semester */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-3.5 bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 text-white rounded-2xl shadow-sm print:hidden">
         <div className="flex items-center gap-3">
@@ -751,21 +751,6 @@ export const RekapLegerRaporTab: React.FC<RekapLegerRaporTabProps> = ({
             </button>
           </div>
         </div>
-      </div>
-
-      {/* 3. Printable Kop & Header (Hanya muncul saat cetak) */}
-      <div className="hidden print:block mb-4 text-center border-b-2 border-black pb-2">
-        <h1 className="text-base font-black uppercase tracking-wider">
-          {isMid
-            ? 'LEGER REKAPITULASI NILAI ASESMEN SUMATIF TENGAH SEMESTER (STS)'
-            : 'LEGER REKAPITULASI HASIL BELAJAR PESERTA DIDIK (RAPOR KMPM)'}
-        </h1>
-        <h2 className="text-xs font-bold uppercase tracking-wide text-slate-800">
-          KURIKULUM MERDEKA PEMBELAJARAN MENDALAM (KMPM) &bull; {schoolInfo.schoolName.toUpperCase()}
-        </h2>
-        <p className="text-[11px] text-slate-700 mt-1">
-          Kelas: <strong>{schoolInfo.className}</strong> &bull; Fase: <strong>{schoolInfo.phase || 'Fase B'}</strong> &bull; Semester: <strong>{schoolInfo.semester}</strong> &bull; Tahun Ajaran: <strong>{schoolInfo.academicYear}</strong>
-        </p>
       </div>
 
       {/* 4. SUB-VIEW 1: MATRIKS LEGER NILAI MAPEL LENGKAP */}
@@ -1302,7 +1287,7 @@ export const RekapLegerRaporTab: React.FC<RekapLegerRaporTabProps> = ({
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => handlePrint('leaderboard')}
+                  onClick={() => handlePrint('leaderboard', activePeriod)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shadow-xs transition-all"
                 >
                   <Printer className="h-3.5 w-3.5" />
@@ -1500,7 +1485,7 @@ export const RekapLegerRaporTab: React.FC<RekapLegerRaporTabProps> = ({
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => handlePrint('kenaikan')}
+                onClick={() => handlePrint('kenaikan', activePeriod)}
                 className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-white text-xs font-bold shadow-xs transition-all"
               >
                 <Printer className="h-4 w-4" />
@@ -1783,6 +1768,7 @@ export const RekapLegerRaporTab: React.FC<RekapLegerRaporTabProps> = ({
           isOpen={isPrintLegerOpen}
           onClose={() => setIsPrintLegerOpen(false)}
           defaultMode={printLegerMode}
+          defaultPeriod={printLegerPeriod}
         />
       )}
     </div>
