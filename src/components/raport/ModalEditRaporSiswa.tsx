@@ -19,7 +19,9 @@ import {
   ArrowRight,
   RefreshCw,
   MessageSquare,
-  UserCheck
+  UserCheck,
+  CalendarCheck,
+  Edit3
 } from 'lucide-react';
 
 interface ModalEditRaporSiswaProps {
@@ -43,13 +45,43 @@ export const ModalEditRaporSiswa: React.FC<ModalEditRaporSiswaProps> = ({
     calculateStudentRankings,
     calculateMidSemesterRankings,
     getStudentKokurikulerInfo,
+    getStudentAttendanceStats,
     students
   } = useApp();
 
   const reportData = getStudentReport(student.id);
   const kokurInfo = getStudentKokurikulerInfo(student.id);
+  const autoAttendance = getStudentAttendanceStats(student.id);
 
   const [activeTab, setActiveTab] = useState<'semester' | 'mid_semester'>('semester');
+
+  // Attendance fields for Semester
+  const [isManualAbsensi, setIsManualAbsensi] = useState<boolean>(
+    reportData.customAbsensi?.isManual || false
+  );
+  const [absensiSakit, setAbsensiSakit] = useState<number>(
+    reportData.customAbsensi?.sakit ?? autoAttendance.sakit
+  );
+  const [absensiIzin, setAbsensiIzin] = useState<number>(
+    reportData.customAbsensi?.izin ?? autoAttendance.izin
+  );
+  const [absensiAlpa, setAbsensiAlpa] = useState<number>(
+    reportData.customAbsensi?.alpa ?? autoAttendance.alpa
+  );
+
+  // Attendance fields for Mid Semester
+  const [isManualAbsensiMid, setIsManualAbsensiMid] = useState<boolean>(
+    reportData.customAbsensiMid?.isManual || false
+  );
+  const [absensiSakitMid, setAbsensiSakitMid] = useState<number>(
+    reportData.customAbsensiMid?.sakit ?? autoAttendance.sakit
+  );
+  const [absensiIzinMid, setAbsensiIzinMid] = useState<number>(
+    reportData.customAbsensiMid?.izin ?? autoAttendance.izin
+  );
+  const [absensiAlpaMid, setAbsensiAlpaMid] = useState<number>(
+    reportData.customAbsensiMid?.alpa ?? autoAttendance.alpa
+  );
 
   // Semester fields
   const [ranking, setRanking] = useState<string | number>(reportData.ranking ?? 1);
@@ -65,6 +97,7 @@ export const ModalEditRaporSiswa: React.FC<ModalEditRaporSiswaProps> = ({
   );
   const [tempatTanggalRapor, setTempatTanggalRapor] = useState<string>(reportData.tempatTanggalRapor || `${schoolInfo.city}, 20 Juni 2027`);
   const [showRanking, setShowRanking] = useState<boolean>(reportData.showRanking !== false);
+  const [showMidDeskripsi, setShowMidDeskripsi] = useState<boolean>(reportData.showMidDeskripsi !== false);
   const [showKenaikan, setShowKenaikan] = useState<boolean>(reportData.showKenaikan !== false);
   const [parentSignatureChoice, setParentSignatureChoice] = useState<'auto' | 'ayah' | 'ibu' | 'custom' | 'dots'>(
     reportData.parentSignatureChoice || 'auto'
@@ -104,9 +137,21 @@ export const ModalEditRaporSiswa: React.FC<ModalEditRaporSiswaProps> = ({
       setTempatTanggalRapor(current.tempatTanggalRapor || `${schoolInfo.city}, 20 Juni 2027`);
       setTempatTanggalRaporMid(current.tempatTanggalRaporMid || defaultMidTanggal);
       setShowRanking(current.showRanking !== false);
+      setShowMidDeskripsi(current.showMidDeskripsi !== false);
       setShowKenaikan(current.showKenaikan !== false);
       setParentSignatureChoice(current.parentSignatureChoice || 'auto');
       setParentCustomName(current.parentCustomName || '');
+
+      const att = getStudentAttendanceStats(student.id);
+      setIsManualAbsensi(current.customAbsensi?.isManual || false);
+      setAbsensiSakit(current.customAbsensi?.sakit ?? att.sakit);
+      setAbsensiIzin(current.customAbsensi?.izin ?? att.izin);
+      setAbsensiAlpa(current.customAbsensi?.alpa ?? att.alpa);
+
+      setIsManualAbsensiMid(current.customAbsensiMid?.isManual || false);
+      setAbsensiSakitMid(current.customAbsensiMid?.sakit ?? att.sakit);
+      setAbsensiIzinMid(current.customAbsensiMid?.izin ?? att.izin);
+      setAbsensiAlpaMid(current.customAbsensiMid?.alpa ?? att.alpa);
     }
   }, [student, isOpen]);
 
@@ -231,9 +276,26 @@ export const ModalEditRaporSiswa: React.FC<ModalEditRaporSiswaProps> = ({
       tempatTanggalRapor,
       tempatTanggalRaporMid,
       showRanking,
+      showMidDeskripsi,
       showKenaikan,
       parentSignatureChoice,
-      parentCustomName
+      parentCustomName,
+      customAbsensi: isManualAbsensi
+        ? {
+            isManual: true,
+            sakit: Math.max(0, absensiSakit),
+            izin: Math.max(0, absensiIzin),
+            alpa: Math.max(0, absensiAlpa)
+          }
+        : { isManual: false },
+      customAbsensiMid: isManualAbsensiMid
+        ? {
+            isManual: true,
+            sakit: Math.max(0, absensiSakitMid),
+            izin: Math.max(0, absensiIzinMid),
+            alpa: Math.max(0, absensiAlpaMid)
+          }
+        : { isManual: false }
     });
     onClose();
   };
@@ -693,12 +755,160 @@ export const ModalEditRaporSiswa: React.FC<ModalEditRaporSiswaProps> = ({
                 )}
               </div>
 
-              {/* SECTION 6: TANGGAL PENGESAHAN AKHIR SEMESTER */}
+              {/* SECTION 6: REKAPITULASI PRESENSI / KETIDAKHADIRAN RAPOR */}
+              <div className="rounded-xl border border-amber-200 dark:border-amber-800/60 p-4 bg-amber-50/40 dark:bg-amber-950/20 space-y-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <CalendarCheck className="h-4 w-4 text-amber-600" />
+                    <label className="font-bold text-slate-900 dark:text-white text-xs">
+                      6. Rekapitulasi Presensi / Ketidakhadiran Rapor (Kolom C)
+                    </label>
+                  </div>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                    isManualAbsensi
+                      ? 'bg-amber-200 text-amber-900 dark:bg-amber-900 dark:text-amber-200'
+                      : 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300'
+                  }`}>
+                    {isManualAbsensi ? 'Mode: Input Manual / Sendiri' : 'Mode: Otomatis Presensi Harian'}
+                  </span>
+                </div>
+
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                  Pilih apakah absensi pada lembar rapor dihitung otomatis dari rekap absensi harian kelas, atau diinput sendiri secara manual.
+                </p>
+
+                {/* Mode Selector */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsManualAbsensi(false)}
+                    className={`p-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-2.5 text-left ${
+                      !isManualAbsensi
+                        ? 'border-blue-600 bg-blue-50/80 dark:bg-blue-950/50 text-blue-900 dark:text-blue-200 shadow-xs'
+                        : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className={`h-4 w-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                      !isManualAbsensi ? 'border-blue-600' : 'border-slate-400'
+                    }`}>
+                      {!isManualAbsensi && <div className="h-2 w-2 rounded-full bg-blue-600" />}
+                    </div>
+                    <div>
+                      <div className="font-bold">Hitung Otomatis</div>
+                      <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400">
+                        S: {autoAttendance.sakit} • I: {autoAttendance.izin} • A: {autoAttendance.alpa} hari
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsManualAbsensi(true)}
+                    className={`p-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-2.5 text-left ${
+                      isManualAbsensi
+                        ? 'border-amber-600 bg-amber-50/80 dark:bg-amber-950/50 text-amber-900 dark:text-amber-200 shadow-xs'
+                        : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className={`h-4 w-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                      isManualAbsensi ? 'border-amber-600' : 'border-slate-400'
+                    }`}>
+                      {isManualAbsensi && <div className="h-2 w-2 rounded-full bg-amber-600" />}
+                    </div>
+                    <div>
+                      <div className="font-bold">Input Sendiri / Manual</div>
+                      <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400">
+                        Ketik bebas jumlah hari sakit, izin, alpa
+                      </div>
+                    </div>
+                  </button>
+                </div>
+
+                {/* Input Fields for Attendance */}
+                <div className={`grid grid-cols-3 gap-2.5 p-3 rounded-xl border ${
+                  isManualAbsensi
+                    ? 'border-amber-300 bg-white dark:bg-slate-800/80'
+                    : 'border-slate-200 bg-slate-100/70 dark:border-slate-700 dark:bg-slate-800/40 opacity-75'
+                }`}>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1 text-center">
+                      Sakit (S)
+                    </label>
+                    <div className="flex items-center justify-center gap-1">
+                      <input
+                        type="number"
+                        min="0"
+                        max="365"
+                        disabled={!isManualAbsensi}
+                        value={isManualAbsensi ? absensiSakit : autoAttendance.sakit}
+                        onChange={e => setAbsensiSakit(Math.max(0, parseInt(e.target.value) || 0))}
+                        className="w-full text-center py-1.5 px-2 rounded-lg border border-slate-300 dark:border-slate-600 font-bold text-xs bg-white dark:bg-slate-900 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-amber-500 disabled:opacity-60"
+                      />
+                      <span className="text-[11px] text-slate-500 font-medium">hari</span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1 text-center">
+                      Izin (I)
+                    </label>
+                    <div className="flex items-center justify-center gap-1">
+                      <input
+                        type="number"
+                        min="0"
+                        max="365"
+                        disabled={!isManualAbsensi}
+                        value={isManualAbsensi ? absensiIzin : autoAttendance.izin}
+                        onChange={e => setAbsensiIzin(Math.max(0, parseInt(e.target.value) || 0))}
+                        className="w-full text-center py-1.5 px-2 rounded-lg border border-slate-300 dark:border-slate-600 font-bold text-xs bg-white dark:bg-slate-900 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-amber-500 disabled:opacity-60"
+                      />
+                      <span className="text-[11px] text-slate-500 font-medium">hari</span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1 text-center">
+                      Alpa (A)
+                    </label>
+                    <div className="flex items-center justify-center gap-1">
+                      <input
+                        type="number"
+                        min="0"
+                        max="365"
+                        disabled={!isManualAbsensi}
+                        value={isManualAbsensi ? absensiAlpa : autoAttendance.alpa}
+                        onChange={e => setAbsensiAlpa(Math.max(0, parseInt(e.target.value) || 0))}
+                        className="w-full text-center py-1.5 px-2 rounded-lg border border-slate-300 dark:border-slate-600 font-bold text-xs bg-white dark:bg-slate-900 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-amber-500 disabled:opacity-60"
+                      />
+                      <span className="text-[11px] text-slate-500 font-medium">hari</span>
+                    </div>
+                  </div>
+                </div>
+
+                {isManualAbsensi && (
+                  <div className="flex items-center justify-between text-[11px] text-slate-500">
+                    <span>* Diisi khusus untuk lembar rapor siswa ini</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAbsensiSakit(autoAttendance.sakit);
+                        setAbsensiIzin(autoAttendance.izin);
+                        setAbsensiAlpa(autoAttendance.alpa);
+                      }}
+                      className="text-[10.5px] font-semibold text-blue-600 hover:text-blue-800 underline cursor-pointer"
+                    >
+                      Salin nilai dari presensi harian
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* SECTION 7: TANGGAL PENGESAHAN AKHIR SEMESTER */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1 flex items-center gap-1.5">
                     <Calendar className="h-3.5 w-3.5 text-slate-400" />
-                    <span>6. Tempat & Tanggal Pengesahan Rapor Akhir Semester:</span>
+                    <span>7. Tempat & Tanggal Pengesahan Rapor Akhir Semester:</span>
                   </label>
                   <input
                     type="text"
@@ -718,16 +928,29 @@ export const ModalEditRaporSiswa: React.FC<ModalEditRaporSiswaProps> = ({
             <>
               {/* SECTION 1: RANKING MID SEMESTER */}
               <div className="rounded-xl border border-amber-200 dark:border-amber-800 p-4 bg-amber-50/40 dark:bg-amber-950/20 space-y-3">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between flex-wrap gap-2">
                   <div className="flex items-center gap-2">
                     <Award className="h-4 w-4 text-amber-600" />
                     <label className="font-bold text-slate-900 dark:text-white text-xs">
                       1. Ranking / Peringkat Tengah Semester (STS)
                     </label>
                   </div>
-                  <span className="text-[10px] text-amber-700 dark:text-amber-300 font-bold bg-amber-100 dark:bg-amber-900/60 px-2 py-0.5 rounded">
-                    Rapor Mid Semester
-                  </span>
+                  <div className="flex items-center gap-2.5">
+                    <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={showMidDeskripsi}
+                        onChange={e => setShowMidDeskripsi(e.target.checked)}
+                        className="rounded text-amber-600 focus:ring-amber-500"
+                      />
+                      <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                        Cetak Deskripsi Capaian
+                      </span>
+                    </label>
+                    <span className="text-[10px] text-amber-700 dark:text-amber-300 font-bold bg-amber-100 dark:bg-amber-900/60 px-2 py-0.5 rounded">
+                      Rapor Mid Semester
+                    </span>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
@@ -895,7 +1118,155 @@ export const ModalEditRaporSiswa: React.FC<ModalEditRaporSiswaProps> = ({
                 )}
               </div>
 
-              {/* SECTION 3: TANGGAL PENGESAHAN MID SEMESTER */}
+              {/* SECTION 3: REKAPITULASI PRESENSI / KETIDAKHADIRAN RAPOR MID */}
+              <div className="rounded-xl border border-amber-200 dark:border-amber-800/60 p-4 bg-amber-50/40 dark:bg-amber-950/20 space-y-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <CalendarCheck className="h-4 w-4 text-amber-600" />
+                    <label className="font-bold text-slate-900 dark:text-white text-xs">
+                      Rekapitulasi Presensi / Ketidakhadiran Rapor Tengah Semester
+                    </label>
+                  </div>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                    isManualAbsensiMid
+                      ? 'bg-amber-200 text-amber-900 dark:bg-amber-900 dark:text-amber-200'
+                      : 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300'
+                  }`}>
+                    {isManualAbsensiMid ? 'Mode: Input Manual / Sendiri' : 'Mode: Otomatis Presensi Harian'}
+                  </span>
+                </div>
+
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                  Pilih apakah absensi pada lembar rapor tengah semester dihitung otomatis dari rekap absensi harian kelas, atau diinput sendiri secara manual.
+                </p>
+
+                {/* Mode Selector */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsManualAbsensiMid(false)}
+                    className={`p-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-2.5 text-left ${
+                      !isManualAbsensiMid
+                        ? 'border-amber-600 bg-amber-50/80 dark:bg-amber-950/50 text-amber-900 dark:text-amber-200 shadow-xs'
+                        : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className={`h-4 w-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                      !isManualAbsensiMid ? 'border-amber-600' : 'border-slate-400'
+                    }`}>
+                      {!isManualAbsensiMid && <div className="h-2 w-2 rounded-full bg-amber-600" />}
+                    </div>
+                    <div>
+                      <div className="font-bold">Hitung Otomatis</div>
+                      <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400">
+                        S: {autoAttendance.sakit} • I: {autoAttendance.izin} • A: {autoAttendance.alpa} hari
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsManualAbsensiMid(true)}
+                    className={`p-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-2.5 text-left ${
+                      isManualAbsensiMid
+                        ? 'border-amber-600 bg-amber-50/80 dark:bg-amber-950/50 text-amber-900 dark:text-amber-200 shadow-xs'
+                        : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className={`h-4 w-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                      isManualAbsensiMid ? 'border-amber-600' : 'border-slate-400'
+                    }`}>
+                      {isManualAbsensiMid && <div className="h-2 w-2 rounded-full bg-amber-600" />}
+                    </div>
+                    <div>
+                      <div className="font-bold">Input Sendiri / Manual</div>
+                      <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400">
+                        Ketik bebas jumlah hari sakit, izin, alpa
+                      </div>
+                    </div>
+                  </button>
+                </div>
+
+                {/* Input Fields for Attendance */}
+                <div className={`grid grid-cols-3 gap-2.5 p-3 rounded-xl border ${
+                  isManualAbsensiMid
+                    ? 'border-amber-300 bg-white dark:bg-slate-800/80'
+                    : 'border-slate-200 bg-slate-100/70 dark:border-slate-700 dark:bg-slate-800/40 opacity-75'
+                }`}>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1 text-center">
+                      Sakit (S)
+                    </label>
+                    <div className="flex items-center justify-center gap-1">
+                      <input
+                        type="number"
+                        min="0"
+                        max="365"
+                        disabled={!isManualAbsensiMid}
+                        value={isManualAbsensiMid ? absensiSakitMid : autoAttendance.sakit}
+                        onChange={e => setAbsensiSakitMid(Math.max(0, parseInt(e.target.value) || 0))}
+                        className="w-full text-center py-1.5 px-2 rounded-lg border border-slate-300 dark:border-slate-600 font-bold text-xs bg-white dark:bg-slate-900 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-amber-500 disabled:opacity-60"
+                      />
+                      <span className="text-[11px] text-slate-500 font-medium">hari</span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1 text-center">
+                      Izin (I)
+                    </label>
+                    <div className="flex items-center justify-center gap-1">
+                      <input
+                        type="number"
+                        min="0"
+                        max="365"
+                        disabled={!isManualAbsensiMid}
+                        value={isManualAbsensiMid ? absensiIzinMid : autoAttendance.izin}
+                        onChange={e => setAbsensiIzinMid(Math.max(0, parseInt(e.target.value) || 0))}
+                        className="w-full text-center py-1.5 px-2 rounded-lg border border-slate-300 dark:border-slate-600 font-bold text-xs bg-white dark:bg-slate-900 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-amber-500 disabled:opacity-60"
+                      />
+                      <span className="text-[11px] text-slate-500 font-medium">hari</span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1 text-center">
+                      Alpa (A)
+                    </label>
+                    <div className="flex items-center justify-center gap-1">
+                      <input
+                        type="number"
+                        min="0"
+                        max="365"
+                        disabled={!isManualAbsensiMid}
+                        value={isManualAbsensiMid ? absensiAlpaMid : autoAttendance.alpa}
+                        onChange={e => setAbsensiAlpaMid(Math.max(0, parseInt(e.target.value) || 0))}
+                        className="w-full text-center py-1.5 px-2 rounded-lg border border-slate-300 dark:border-slate-600 font-bold text-xs bg-white dark:bg-slate-900 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-amber-500 disabled:opacity-60"
+                      />
+                      <span className="text-[11px] text-slate-500 font-medium">hari</span>
+                    </div>
+                  </div>
+                </div>
+
+                {isManualAbsensiMid && (
+                  <div className="flex items-center justify-between text-[11px] text-slate-500">
+                    <span>* Diisi khusus untuk lembar rapor tengah semester siswa ini</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAbsensiSakitMid(autoAttendance.sakit);
+                        setAbsensiIzinMid(autoAttendance.izin);
+                        setAbsensiAlpaMid(autoAttendance.alpa);
+                      }}
+                      className="text-[10.5px] font-semibold text-amber-600 hover:text-amber-800 underline cursor-pointer"
+                    >
+                      Salin nilai dari presensi harian
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* SECTION 4: TANGGAL PENGESAHAN MID SEMESTER */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1 flex items-center gap-1.5">

@@ -1,4 +1,5 @@
 import React from 'react';
+import { Edit3, RotateCcw, Check, Eye, EyeOff, FileText } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Student, isSemesterGenap, ReportType } from '../../types';
 import { HeaderKopSekolah } from '../common/HeaderKopSekolah';
@@ -15,6 +16,7 @@ export interface PrintSettings {
   equalizeLogos?: boolean;
   logoSize?: number;
   parentSignatureChoice?: 'ayah' | 'ibu' | 'dots';
+  showMidDeskripsi?: boolean;
 }
 
 interface StudentReportCardSheetProps {
@@ -22,13 +24,15 @@ interface StudentReportCardSheetProps {
   printSettings?: Partial<PrintSettings>;
   className?: string;
   isPageBreakAfter?: boolean;
+  onToggleShowMidDeskripsi?: (val: boolean) => void;
 }
 
 export const StudentReportCardSheet: React.FC<StudentReportCardSheetProps> = ({
   student,
   printSettings,
   className = '',
-  isPageBreakAfter = false
+  isPageBreakAfter = false,
+  onToggleShowMidDeskripsi
 }: StudentReportCardSheetProps) => {
   const {
     schoolInfo,
@@ -38,12 +42,18 @@ export const StudentReportCardSheet: React.FC<StudentReportCardSheetProps> = ({
     getStudentAttendanceStats,
     extracurriculars,
     getStudentReport,
-    getStudentKokurikulerInfo
+    getStudentKokurikulerInfo,
+    getEffectiveStudentAttendance,
+    updateStudentReportAttendance,
+    updateStudentReport
   } = useApp();
 
   const isGenap = isSemesterGenap(schoolInfo.semester);
   const isMidSemester = printSettings?.reportType === 'mid_semester';
   const reportData = getStudentReport(student.id);
+
+  // Effective attendance: manual overrides or calculated from daily records
+  const effectiveAttendance = getEffectiveStudentAttendance(student.id, isMidSemester);
 
   // Page break mode: standard 2 pages for semester report (Page 1: Nilai, Page 2: Catatan/TTD)
   const pageBreakMode = printSettings?.pageBreakMode || (isMidSemester ? 'continuous' : 'standard_2page');
@@ -72,6 +82,16 @@ export const StudentReportCardSheet: React.FC<StudentReportCardSheetProps> = ({
   const showKop = printSettings?.showKop !== false;
   const showSignature = printSettings?.showSignature !== false;
   const showRanking = printSettings?.showRanking !== false && reportData.showRanking !== false;
+  // Pilihan memunculkan atau menyembunyikan deskripsi capaian pembelajaran mendalam di rapor mid semester
+  const showMidDeskripsi = printSettings?.showMidDeskripsi !== false && reportData.showMidDeskripsi !== false;
+
+  const handleToggleDeskripsi = () => {
+    const nextVal = !showMidDeskripsi;
+    if (onToggleShowMidDeskripsi) {
+      onToggleShowMidDeskripsi(nextVal);
+    }
+    updateStudentReport(student.id, { showMidDeskripsi: nextVal }, true);
+  };
 
   // Adjust text & padding sizing based on density
   const tableTextSize = density === 'compact' ? 'text-[10px]' : density === 'spacious' ? 'text-[12px]' : 'text-[11px]';
@@ -225,24 +245,62 @@ export const StudentReportCardSheet: React.FC<StudentReportCardSheetProps> = ({
 
         {/* TABEL A: LAPORAN HASIL BELAJAR (NILAI & CAPAIAN KOMPETENSI) */}
         <div className={sectionSpacing}>
-          <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-900 print:text-black">
-            {isMidSemester
-              ? 'A. Nilai Capaian Pembelajaran Mendalam Tengah Semester (STS KMPM)'
-              : 'A. Nilai Capaian Pembelajaran Mendalam Peserta Didik (KMPM)'}
-          </h3>
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900 print:text-black">
+              {isMidSemester
+                ? (showMidDeskripsi
+                    ? 'A. Nilai Capaian Pembelajaran Mendalam Tengah Semester (STS KMPM)'
+                    : 'A. Rekapitulasi Nilai Asesmen Sumatif Tengah Semester (STS)')
+                : 'A. Nilai Capaian Pembelajaran Mendalam Peserta Didik (KMPM)'}
+            </h3>
+            {isMidSemester && (
+              <div className="print:hidden flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleToggleDeskripsi}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all cursor-pointer shadow-2xs ${
+                    showMidDeskripsi
+                      ? 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-950/60 dark:text-amber-200 dark:border-amber-700'
+                      : 'bg-blue-50 hover:bg-blue-100 text-blue-900 border-blue-300 dark:bg-blue-950/60 dark:text-blue-200 dark:border-blue-700'
+                  }`}
+                  title={
+                    showMidDeskripsi
+                      ? 'Klik untuk menyembunyikan kolom deskripsi capaian pembelajaran mendalam'
+                      : 'Klik untuk memunculkan kembali kolom deskripsi capaian pembelajaran mendalam'
+                  }
+                >
+                  {showMidDeskripsi ? (
+                    <>
+                      <EyeOff className="h-3.5 w-3.5 text-amber-700 dark:text-amber-400" />
+                      <span>Deskripsi: Muncul</span>
+                      <span className="text-[10px] font-normal opacity-75 hidden sm:inline">(Klik Sembunyikan)</span>
+                    </>
+                  ) : (
+                    <>
+                      <Eye className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                      <span>Deskripsi: Disembunyikan</span>
+                      <span className="text-[10px] font-normal opacity-75 hidden sm:inline">(Klik Munculkan)</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
+          </div>
           <table className={`w-full border-collapse border border-slate-800 print:border-black ${tableTextSize}`}>
             <thead>
               <tr className="bg-slate-100 print:bg-gray-100 text-center font-bold">
                 <th className={`border border-slate-800 print:border-black ${headerPadding} w-9 print:w-8 text-black`}>No</th>
-                <th className={`border border-slate-800 print:border-black ${headerPadding} text-left w-48 sm:w-52 print:w-44 text-black`}>Muatan Mata Pelajaran</th>
-                <th className={`border border-slate-800 print:border-black ${headerPadding} w-16 text-black`}>
+                <th className={`border border-slate-800 print:border-black ${headerPadding} text-left ${(!isMidSemester || showMidDeskripsi) ? 'w-48 sm:w-52 print:w-44' : ''} text-black`}>Muatan Mata Pelajaran</th>
+                <th className={`border border-slate-800 print:border-black ${headerPadding} ${(!isMidSemester || showMidDeskripsi) ? 'w-16' : 'w-32 sm:w-40 print:w-36'} text-black`}>
                   {isMidSemester ? 'Nilai STS' : 'Nilai Akhir'}
                 </th>
-                <th className={`border border-slate-800 print:border-black ${headerPadding} text-left text-black`}>
-                  {isMidSemester
-                    ? 'Capaian Pembelajaran Mendalam Tengah Semester (Deskripsi Kemajuan Belajar)'
-                    : 'Capaian Kompetensi & Pembelajaran Mendalam (Deskripsi Kemajuan Belajar)'}
-                </th>
+                {(!isMidSemester || showMidDeskripsi) && (
+                  <th className={`border border-slate-800 print:border-black ${headerPadding} text-left text-black`}>
+                    {isMidSemester
+                      ? 'Capaian Pembelajaran Mendalam Tengah Semester (Deskripsi Kemajuan Belajar)'
+                      : 'Capaian Kompetensi & Pembelajaran Mendalam (Deskripsi Kemajuan Belajar)'}
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -262,9 +320,11 @@ export const StudentReportCardSheet: React.FC<StudentReportCardSheetProps> = ({
                         <td className={`border border-slate-800 print:border-black ${cellPadding} text-center font-extrabold text-black`}>
                           {scoreSTS}
                         </td>
-                        <td className={`border border-slate-800 print:border-black ${cellPadding} text-justify ${tableDescSize} text-black`}>
-                          {g.deskripsiCapaian || `Peserta didik menunjukkan pemahaman konsep yang sangat mendalam dan bermakna dalam materi pembelajaran ${subjectName} hingga tengah semester.`}
-                        </td>
+                        {showMidDeskripsi && (
+                          <td className={`border border-slate-800 print:border-black ${cellPadding} text-justify ${tableDescSize} text-black`}>
+                            {g.deskripsiCapaian || `Peserta didik menunjukkan pemahaman konsep yang sangat mendalam dan bermakna dalam materi pembelajaran ${subjectName} hingga tengah semester.`}
+                          </td>
+                        )}
                       </tr>
                     );
                   })
@@ -287,17 +347,38 @@ export const StudentReportCardSheet: React.FC<StudentReportCardSheetProps> = ({
                     );
                   })}
               {/* Summary row */}
-              <tr className="bg-slate-50 print:bg-gray-100 font-bold print-avoid-break">
-                <td colSpan={2} className={`border border-slate-800 print:border-black ${cellPadding} text-right text-black`}>
-                  Jumlah / Total Nilai & Rata-rata :
-                </td>
-                <td className={`border border-slate-800 print:border-black ${cellPadding} text-center font-black text-xs text-black`}>
-                  {totalScore}
-                </td>
-                <td className={`border border-slate-800 print:border-black ${cellPadding} text-left text-xs font-bold text-black`}>
-                  Rata-rata Nilai: {avgScore}
-                </td>
-              </tr>
+              {(!isMidSemester || showMidDeskripsi) ? (
+                <tr className="bg-slate-50 print:bg-gray-100 font-bold print-avoid-break">
+                  <td colSpan={2} className={`border border-slate-800 print:border-black ${cellPadding} text-right text-black`}>
+                    Jumlah / Total Nilai & Rata-rata :
+                  </td>
+                  <td className={`border border-slate-800 print:border-black ${cellPadding} text-center font-black text-xs text-black`}>
+                    {totalScore}
+                  </td>
+                  <td className={`border border-slate-800 print:border-black ${cellPadding} text-left text-xs font-bold text-black`}>
+                    Rata-rata Nilai: {avgScore}
+                  </td>
+                </tr>
+              ) : (
+                <>
+                  <tr className="bg-slate-50 print:bg-gray-100 font-bold print-avoid-break">
+                    <td colSpan={2} className={`border border-slate-800 print:border-black ${cellPadding} text-right text-black`}>
+                      Jumlah / Total Nilai STS :
+                    </td>
+                    <td className={`border border-slate-800 print:border-black ${cellPadding} text-center font-black text-xs text-black`}>
+                      {totalScore}
+                    </td>
+                  </tr>
+                  <tr className="bg-slate-50 print:bg-gray-100 font-bold print-avoid-break">
+                    <td colSpan={2} className={`border border-slate-800 print:border-black ${cellPadding} text-right text-black`}>
+                      Nilai Rata-rata STS :
+                    </td>
+                    <td className={`border border-slate-800 print:border-black ${cellPadding} text-center font-black text-xs text-black`}>
+                      {avgScore}
+                    </td>
+                  </tr>
+                </>
+              )}
             </tbody>
           </table>
         </div>
@@ -366,44 +447,59 @@ export const StudentReportCardSheet: React.FC<StudentReportCardSheetProps> = ({
 
             {/* Rekapitulasi Presensi */}
             <div>
-              <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-900 print:text-black">
-                C. Ketidakhadiran (Presensi)
-              </h3>
-              <table className={`w-full border-collapse border border-slate-800 print:border-black ${tableTextSize}`}>
-                <thead>
-                  <tr className="bg-slate-100 print:bg-gray-100 text-center font-bold">
-                    <th className={`border border-slate-800 print:border-black ${cellPadding} w-8 text-black`}>No</th>
-                    <th className={`border border-slate-800 print:border-black ${cellPadding} text-left text-black`}>Alasan Ketidakhadiran</th>
-                    <th className={`border border-slate-800 print:border-black ${cellPadding} w-24 text-black`}>Jumlah Hari</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr className="print-avoid-break">
-                    <td className={`border border-slate-800 print:border-black ${cellPadding} text-center text-black`}>1</td>
-                    <td className={`border border-slate-800 print:border-black ${cellPadding} text-black`}>Sakit (S)</td>
-                    <td className={`border border-slate-800 print:border-black ${cellPadding} text-center font-bold text-black`}>{attendanceStats.sakit} hari</td>
-                  </tr>
-                  <tr className="print-avoid-break">
-                    <td className={`border border-slate-800 print:border-black ${cellPadding} text-center text-black`}>2</td>
-                    <td className={`border border-slate-800 print:border-black ${cellPadding} text-black`}>Izin (I)</td>
-                    <td className={`border border-slate-800 print:border-black ${cellPadding} text-center font-bold text-black`}>{attendanceStats.izin} hari</td>
-                  </tr>
-                  <tr className="print-avoid-break">
-                    <td className={`border border-slate-800 print:border-black ${cellPadding} text-center text-black`}>3</td>
-                    <td className={`border border-slate-800 print:border-black ${cellPadding} text-black`}>Tanpa Keterangan (A)</td>
-                    <td className={`border border-slate-800 print:border-black ${cellPadding} text-center font-bold text-black`}>{attendanceStats.alpa} hari</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        ) : (
-          /* Tampilan Rapor Mid Semester: Ekstrakurikuler dihilangkan, hanya menampilkan Presensi */
-          <div className={`${sectionSpacing} print-avoid-break`}>
-            <div className="w-full max-w-md">
-              <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-900 print:text-black">
-                B. Ketidakhadiran (Presensi)
-              </h3>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900 print:text-black">
+                  C. Ketidakhadiran (Presensi)
+                </h3>
+                {/* Mode Status & Interactive Switcher (Screen-Only) */}
+                <div className="print:hidden flex items-center gap-1.5">
+                  {effectiveAttendance.isManual ? (
+                    <>
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1">
+                        <Edit3 className="h-2.5 w-2.5" />
+                        <span>Input Sendiri</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateStudentReportAttendance(
+                            student.id,
+                            { isManual: false },
+                            false
+                          )
+                        }
+                        className="flex items-center gap-1 text-[10px] text-blue-700 hover:text-blue-900 font-semibold underline cursor-pointer"
+                        title="Kembalikan ke hitungan presensi harian otomatis"
+                      >
+                        <RotateCcw className="h-2.5 w-2.5" />
+                        <span>Reset Otomatis</span>
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateStudentReportAttendance(
+                          student.id,
+                          {
+                            isManual: true,
+                            sakit: effectiveAttendance.autoSakit,
+                            izin: effectiveAttendance.autoIzin,
+                            alpa: effectiveAttendance.autoAlpa
+                          },
+                          false
+                        )
+                      }
+                      className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10.5px] font-bold bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 transition-colors shadow-2xs cursor-pointer"
+                      title="Klik untuk mengubah nilai absensi secara manual / input sendiri"
+                    >
+                      <Edit3 className="h-3 w-3" />
+                      <span>Input Sendiri</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
               <table className={`w-full border-collapse border border-slate-800 print:border-black ${tableTextSize}`}>
                 <thead>
                   <tr className="bg-slate-100 print:bg-gray-100 text-center font-bold">
@@ -416,20 +512,309 @@ export const StudentReportCardSheet: React.FC<StudentReportCardSheetProps> = ({
                   <tr className="print-avoid-break">
                     <td className={`border border-slate-800 print:border-black ${cellPadding} text-center text-black`}>1</td>
                     <td className={`border border-slate-800 print:border-black ${cellPadding} text-black`}>Sakit (S)</td>
-                    <td className={`border border-slate-800 print:border-black ${cellPadding} text-center font-bold text-black`}>{attendanceStats.sakit} hari</td>
+                    <td className={`border border-slate-800 print:border-black ${cellPadding} text-center font-bold text-black`}>
+                      <span className="hidden print:inline">{effectiveAttendance.sakit} hari</span>
+                      <div className="print:hidden flex items-center justify-center gap-1">
+                        {effectiveAttendance.isManual ? (
+                          <>
+                            <input
+                              type="number"
+                              min="0"
+                              max="365"
+                              value={effectiveAttendance.sakit}
+                              onChange={e =>
+                                updateStudentReportAttendance(
+                                  student.id,
+                                  {
+                                    isManual: true,
+                                    sakit: Math.max(0, parseInt(e.target.value) || 0),
+                                    izin: effectiveAttendance.izin,
+                                    alpa: effectiveAttendance.alpa
+                                  },
+                                  false,
+                                  true
+                                )
+                              }
+                              className="w-14 px-1 py-0.5 text-center font-bold border border-amber-400 bg-amber-50 rounded text-xs text-amber-950 outline-none focus:ring-1 focus:ring-amber-500 shadow-2xs"
+                              title="Ketik jumlah hari sakit"
+                            />
+                            <span className="text-[11px] font-semibold text-slate-700">hari</span>
+                          </>
+                        ) : (
+                          <span>{effectiveAttendance.sakit} hari</span>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                   <tr className="print-avoid-break">
                     <td className={`border border-slate-800 print:border-black ${cellPadding} text-center text-black`}>2</td>
                     <td className={`border border-slate-800 print:border-black ${cellPadding} text-black`}>Izin (I)</td>
-                    <td className={`border border-slate-800 print:border-black ${cellPadding} text-center font-bold text-black`}>{attendanceStats.izin} hari</td>
+                    <td className={`border border-slate-800 print:border-black ${cellPadding} text-center font-bold text-black`}>
+                      <span className="hidden print:inline">{effectiveAttendance.izin} hari</span>
+                      <div className="print:hidden flex items-center justify-center gap-1">
+                        {effectiveAttendance.isManual ? (
+                          <>
+                            <input
+                              type="number"
+                              min="0"
+                              max="365"
+                              value={effectiveAttendance.izin}
+                              onChange={e =>
+                                updateStudentReportAttendance(
+                                  student.id,
+                                  {
+                                    isManual: true,
+                                    sakit: effectiveAttendance.sakit,
+                                    izin: Math.max(0, parseInt(e.target.value) || 0),
+                                    alpa: effectiveAttendance.alpa
+                                  },
+                                  false,
+                                  true
+                                )
+                              }
+                              className="w-14 px-1 py-0.5 text-center font-bold border border-amber-400 bg-amber-50 rounded text-xs text-amber-950 outline-none focus:ring-1 focus:ring-amber-500 shadow-2xs"
+                              title="Ketik jumlah hari izin"
+                            />
+                            <span className="text-[11px] font-semibold text-slate-700">hari</span>
+                          </>
+                        ) : (
+                          <span>{effectiveAttendance.izin} hari</span>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                   <tr className="print-avoid-break">
                     <td className={`border border-slate-800 print:border-black ${cellPadding} text-center text-black`}>3</td>
                     <td className={`border border-slate-800 print:border-black ${cellPadding} text-black`}>Tanpa Keterangan (A)</td>
-                    <td className={`border border-slate-800 print:border-black ${cellPadding} text-center font-bold text-black`}>{attendanceStats.alpa} hari</td>
+                    <td className={`border border-slate-800 print:border-black ${cellPadding} text-center font-bold text-black`}>
+                      <span className="hidden print:inline">{effectiveAttendance.alpa} hari</span>
+                      <div className="print:hidden flex items-center justify-center gap-1">
+                        {effectiveAttendance.isManual ? (
+                          <>
+                            <input
+                              type="number"
+                              min="0"
+                              max="365"
+                              value={effectiveAttendance.alpa}
+                              onChange={e =>
+                                updateStudentReportAttendance(
+                                  student.id,
+                                  {
+                                    isManual: true,
+                                    sakit: effectiveAttendance.sakit,
+                                    izin: effectiveAttendance.izin,
+                                    alpa: Math.max(0, parseInt(e.target.value) || 0)
+                                  },
+                                  false,
+                                  true
+                                )
+                              }
+                              className="w-14 px-1 py-0.5 text-center font-bold border border-amber-400 bg-amber-50 rounded text-xs text-amber-950 outline-none focus:ring-1 focus:ring-amber-500 shadow-2xs"
+                              title="Ketik jumlah hari alpa / tanpa keterangan"
+                            />
+                            <span className="text-[11px] font-semibold text-slate-700">hari</span>
+                          </>
+                        ) : (
+                          <span>{effectiveAttendance.alpa} hari</span>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 </tbody>
               </table>
+
+              {effectiveAttendance.isManual && (
+                <p className="print:hidden text-[10px] text-amber-700 font-medium mt-1 italic">
+                  * Input absensi sendiri aktif untuk {student.nama}. Data disimpan otomatis dan dicetak rapi pada lembar rapor.
+                </p>
+              )}
+            </div>
+          </div>
+        ) : (
+          /* Tampilan Rapor Mid Semester: Ekstrakurikuler dihilangkan, hanya menampilkan Presensi */
+          <div className={`${sectionSpacing} print-avoid-break`}>
+            <div className="w-full max-w-md">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900 print:text-black">
+                  B. Ketidakhadiran (Presensi)
+                </h3>
+                {/* Mode Status & Interactive Switcher for Mid Semester (Screen-Only) */}
+                <div className="print:hidden flex items-center gap-1.5">
+                  {effectiveAttendance.isManual ? (
+                    <>
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1">
+                        <Edit3 className="h-2.5 w-2.5" />
+                        <span>Input Sendiri</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateStudentReportAttendance(
+                            student.id,
+                            { isManual: false },
+                            true
+                          )
+                        }
+                        className="flex items-center gap-1 text-[10px] text-blue-700 hover:text-blue-900 font-semibold underline cursor-pointer"
+                        title="Kembalikan ke hitungan presensi harian otomatis"
+                      >
+                        <RotateCcw className="h-2.5 w-2.5" />
+                        <span>Reset Otomatis</span>
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateStudentReportAttendance(
+                          student.id,
+                          {
+                            isManual: true,
+                            sakit: effectiveAttendance.autoSakit,
+                            izin: effectiveAttendance.autoIzin,
+                            alpa: effectiveAttendance.autoAlpa
+                          },
+                          true
+                        )
+                      }
+                      className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10.5px] font-bold bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 transition-colors shadow-2xs cursor-pointer"
+                      title="Klik untuk mengubah nilai absensi secara manual / input sendiri"
+                    >
+                      <Edit3 className="h-3 w-3" />
+                      <span>Input Sendiri</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <table className={`w-full border-collapse border border-slate-800 print:border-black ${tableTextSize}`}>
+                <thead>
+                  <tr className="bg-slate-100 print:bg-gray-100 text-center font-bold">
+                    <th className={`border border-slate-800 print:border-black ${cellPadding} w-8 text-black`}>No</th>
+                    <th className={`border border-slate-800 print:border-black ${cellPadding} text-left text-black`}>Alasan Ketidakhadiran</th>
+                    <th className={`border border-slate-800 print:border-black ${cellPadding} w-28 text-black`}>Jumlah Hari</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="print-avoid-break">
+                    <td className={`border border-slate-800 print:border-black ${cellPadding} text-center text-black`}>1</td>
+                    <td className={`border border-slate-800 print:border-black ${cellPadding} text-black`}>Sakit (S)</td>
+                    <td className={`border border-slate-800 print:border-black ${cellPadding} text-center font-bold text-black`}>
+                      <span className="hidden print:inline">{effectiveAttendance.sakit} hari</span>
+                      <div className="print:hidden flex items-center justify-center gap-1">
+                        {effectiveAttendance.isManual ? (
+                          <>
+                            <input
+                              type="number"
+                              min="0"
+                              max="365"
+                              value={effectiveAttendance.sakit}
+                              onChange={e =>
+                                updateStudentReportAttendance(
+                                  student.id,
+                                  {
+                                    isManual: true,
+                                    sakit: Math.max(0, parseInt(e.target.value) || 0),
+                                    izin: effectiveAttendance.izin,
+                                    alpa: effectiveAttendance.alpa
+                                  },
+                                  true,
+                                  true
+                                )
+                              }
+                              className="w-14 px-1 py-0.5 text-center font-bold border border-amber-400 bg-amber-50 rounded text-xs text-amber-950 outline-none focus:ring-1 focus:ring-amber-500 shadow-2xs"
+                              title="Ketik jumlah hari sakit"
+                            />
+                            <span className="text-[11px] font-semibold text-slate-700">hari</span>
+                          </>
+                        ) : (
+                          <span>{effectiveAttendance.sakit} hari</span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                  <tr className="print-avoid-break">
+                    <td className={`border border-slate-800 print:border-black ${cellPadding} text-center text-black`}>2</td>
+                    <td className={`border border-slate-800 print:border-black ${cellPadding} text-black`}>Izin (I)</td>
+                    <td className={`border border-slate-800 print:border-black ${cellPadding} text-center font-bold text-black`}>
+                      <span className="hidden print:inline">{effectiveAttendance.izin} hari</span>
+                      <div className="print:hidden flex items-center justify-center gap-1">
+                        {effectiveAttendance.isManual ? (
+                          <>
+                            <input
+                              type="number"
+                              min="0"
+                              max="365"
+                              value={effectiveAttendance.izin}
+                              onChange={e =>
+                                updateStudentReportAttendance(
+                                  student.id,
+                                  {
+                                    isManual: true,
+                                    sakit: effectiveAttendance.sakit,
+                                    izin: Math.max(0, parseInt(e.target.value) || 0),
+                                    alpa: effectiveAttendance.alpa
+                                  },
+                                  true,
+                                  true
+                                )
+                              }
+                              className="w-14 px-1 py-0.5 text-center font-bold border border-amber-400 bg-amber-50 rounded text-xs text-amber-950 outline-none focus:ring-1 focus:ring-amber-500 shadow-2xs"
+                              title="Ketik jumlah hari izin"
+                            />
+                            <span className="text-[11px] font-semibold text-slate-700">hari</span>
+                          </>
+                        ) : (
+                          <span>{effectiveAttendance.izin} hari</span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                  <tr className="print-avoid-break">
+                    <td className={`border border-slate-800 print:border-black ${cellPadding} text-center text-black`}>3</td>
+                    <td className={`border border-slate-800 print:border-black ${cellPadding} text-black`}>Tanpa Keterangan (A)</td>
+                    <td className={`border border-slate-800 print:border-black ${cellPadding} text-center font-bold text-black`}>
+                      <span className="hidden print:inline">{effectiveAttendance.alpa} hari</span>
+                      <div className="print:hidden flex items-center justify-center gap-1">
+                        {effectiveAttendance.isManual ? (
+                          <>
+                            <input
+                              type="number"
+                              min="0"
+                              max="365"
+                              value={effectiveAttendance.alpa}
+                              onChange={e =>
+                                updateStudentReportAttendance(
+                                  student.id,
+                                  {
+                                    isManual: true,
+                                    sakit: effectiveAttendance.sakit,
+                                    izin: effectiveAttendance.izin,
+                                    alpa: Math.max(0, parseInt(e.target.value) || 0)
+                                  },
+                                  true,
+                                  true
+                                )
+                              }
+                              className="w-14 px-1 py-0.5 text-center font-bold border border-amber-400 bg-amber-50 rounded text-xs text-amber-950 outline-none focus:ring-1 focus:ring-amber-500 shadow-2xs"
+                              title="Ketik jumlah hari alpa / tanpa keterangan"
+                            />
+                            <span className="text-[11px] font-semibold text-slate-700">hari</span>
+                          </>
+                        ) : (
+                          <span>{effectiveAttendance.alpa} hari</span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+
+              {effectiveAttendance.isManual && (
+                <p className="print:hidden text-[10px] text-amber-700 font-medium mt-1 italic">
+                  * Input absensi sendiri aktif untuk {student.nama}. Data disimpan otomatis dan dicetak rapi pada lembar rapor mid semester.
+                </p>
+              )}
             </div>
           </div>
         )}

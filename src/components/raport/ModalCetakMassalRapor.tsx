@@ -35,7 +35,8 @@ export const ModalCetakMassalRapor: React.FC<ModalCetakMassalRaporProps> = ({
   const [sortBy, setSortBy] = useState<'absen' | 'nama' | 'nisn'>('absen');
   const [settings, setSettings] = useState<PrintSettings>({
     ...defaultSettings,
-    parentSignatureChoice: defaultSettings?.parentSignatureChoice || 'ayah'
+    parentSignatureChoice: defaultSettings?.parentSignatureChoice || 'ayah',
+    showMidDeskripsi: defaultSettings?.showMidDeskripsi !== false
   });
 
   if (!isOpen) return null;
@@ -223,6 +224,28 @@ export const ModalCetakMassalRapor: React.FC<ModalCetakMassalRaporProps> = ({
                 </span>
               </label>
             </div>
+
+            {/* Opsi Khusus Rapor Mid Semester: Toggle Deskripsi Capaian */}
+            {settings.reportType === 'mid_semester' && (
+              <div className="pt-2 border-t border-slate-200 dark:border-slate-700">
+                <label className="flex items-start gap-2.5 p-2.5 rounded-xl bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={settings.showMidDeskripsi !== false}
+                    onChange={e => setSettings({ ...settings, showMidDeskripsi: e.target.checked })}
+                    className="rounded text-amber-600 focus:ring-amber-500 mt-0.5"
+                  />
+                  <div>
+                    <span className="font-bold text-xs text-amber-900 dark:text-amber-200 block">
+                      Cetak Kolom Deskripsi Capaian Pembelajaran Mendalam
+                    </span>
+                    <span className="text-[11px] text-amber-700 dark:text-amber-300 block mt-0.5">
+                      Hilangkan centang jika ingin mencetak format ringkas (hanya tabel nilai tanpa uraian deskripsi panjang).
+                    </span>
+                  </div>
+                </label>
+              </div>
+            )}
 
             {/* Pilihan Nama Orang Tua pada Tanda Tangan Cetak Massal */}
             {settings.showSignature && (

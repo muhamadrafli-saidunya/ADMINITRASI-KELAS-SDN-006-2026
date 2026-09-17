@@ -283,6 +283,13 @@ export type KenaikanStatus = 'Naik Kelas' | 'Tinggal Kelas' | 'Lulus' | 'Tidak L
 
 export type ReportType = 'semester' | 'mid_semester';
 
+export interface ReportAttendanceData {
+  isManual: boolean;
+  sakit?: number;
+  izin?: number;
+  alpa?: number;
+}
+
 export interface StudentReportData {
   siswaId: string;
   ranking?: number | string;
@@ -304,6 +311,9 @@ export interface StudentReportData {
   showKenaikan?: boolean;
   parentSignatureChoice?: 'auto' | 'ayah' | 'ibu' | 'custom' | 'dots';
   parentCustomName?: string;
+  customAbsensi?: ReportAttendanceData;
+  customAbsensiMid?: ReportAttendanceData;
+  showMidDeskripsi?: boolean;
 }
 
 export interface Extracurricular {

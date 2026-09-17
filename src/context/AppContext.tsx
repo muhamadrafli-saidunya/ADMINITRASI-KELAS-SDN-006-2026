@@ -207,7 +207,22 @@ interface AppContextType {
   // Raport Siswa, Ranking & Kenaikan Kelas
   studentReports: Record<string, StudentReportData>;
   getStudentReport: (siswaId: string) => StudentReportData;
-  updateStudentReport: (siswaId: string, updated: Partial<StudentReportData>) => void;
+  updateStudentReport: (siswaId: string, updated: Partial<StudentReportData>, silent?: boolean) => void;
+  getEffectiveStudentAttendance: (siswaId: string, isMidSemester?: boolean) => {
+    sakit: number;
+    izin: number;
+    alpa: number;
+    isManual: boolean;
+    autoSakit: number;
+    autoIzin: number;
+    autoAlpa: number;
+  };
+  updateStudentReportAttendance: (
+    siswaId: string,
+    attendance: { isManual: boolean; sakit?: number; izin?: number; alpa?: number },
+    isMidSemester?: boolean,
+    silent?: boolean
+  ) => void;
   bulkAutoCalculateRankings: () => void;
   bulkSetKenaikanKelas: (status: KenaikanStatus, targetKelas?: string) => void;
   calculateStudentRankings: () => Array<{ siswaId: string; rank: number; totalScore: number; avgScore: number }>;
@@ -1825,7 +1840,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return defaultReport;
   };
 
-  const updateStudentReport = (siswaId: string, updated: Partial<StudentReportData>) => {
+  const updateStudentReport = (siswaId: string, updated: Partial<StudentReportData>, silent: boolean = false) => {
     setStudentReports(prev => {
       const current = prev[siswaId] || getStudentReport(siswaId);
       const merged = { ...current, ...updated };
@@ -1834,7 +1849,53 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         [siswaId]: merged
       };
     });
-    addToast('success', 'Rapor Diperbarui', 'Data ranking, catatan, & keputusan kenaikan kelas berhasil disimpan.');
+    if (!silent) {
+      addToast('success', 'Rapor Diperbarui', 'Data ranking, catatan, absensi & keputusan kenaikan kelas berhasil disimpan.');
+    }
+  };
+
+  const getEffectiveStudentAttendance = (siswaId: string, isMidSemester: boolean = false) => {
+    const auto = getStudentAttendanceStats(siswaId);
+    const rep = getStudentReport(siswaId);
+    const custom = isMidSemester ? (rep.customAbsensiMid || rep.customAbsensi) : rep.customAbsensi;
+
+    if (custom && custom.isManual) {
+      const s = typeof custom.sakit === 'number' ? Math.max(0, custom.sakit) : 0;
+      const i = typeof custom.izin === 'number' ? Math.max(0, custom.izin) : 0;
+      const a = typeof custom.alpa === 'number' ? Math.max(0, custom.alpa) : 0;
+      return {
+        sakit: s,
+        izin: i,
+        alpa: a,
+        isManual: true,
+        autoSakit: auto.sakit,
+        autoIzin: auto.izin,
+        autoAlpa: auto.alpa
+      };
+    }
+
+    return {
+      sakit: auto.sakit,
+      izin: auto.izin,
+      alpa: auto.alpa,
+      isManual: false,
+      autoSakit: auto.sakit,
+      autoIzin: auto.izin,
+      autoAlpa: auto.alpa
+    };
+  };
+
+  const updateStudentReportAttendance = (
+    siswaId: string,
+    attendance: { isManual: boolean; sakit?: number; izin?: number; alpa?: number },
+    isMidSemester: boolean = false,
+    silent: boolean = false
+  ) => {
+    if (isMidSemester) {
+      updateStudentReport(siswaId, { customAbsensiMid: attendance }, silent);
+    } else {
+      updateStudentReport(siswaId, { customAbsensi: attendance }, silent);
+    }
   };
 
   const calculateStudentRankings = () => {
@@ -2750,6 +2811,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         studentReports,
         getStudentReport,
         updateStudentReport,
+        getEffectiveStudentAttendance,
+        updateStudentReportAttendance,
         bulkAutoCalculateRankings,
         bulkSetKenaikanKelas,
         calculateStudentRankings,

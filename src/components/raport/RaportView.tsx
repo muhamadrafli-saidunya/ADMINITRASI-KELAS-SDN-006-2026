@@ -30,7 +30,9 @@ import {
   Maximize2,
   FileText,
   ArrowLeft,
-  ArrowRight
+  ArrowRight,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 
 export const RaportView: React.FC = () => {
@@ -67,7 +69,8 @@ export const RaportView: React.FC = () => {
     showRanking: true,
     reportType: 'semester',
     equalizeLogos: true,
-    parentSignatureChoice: 'ayah'
+    parentSignatureChoice: 'ayah',
+    showMidDeskripsi: true
   });
 
   const isGenap = isSemesterGenap(schoolInfo.semester);
@@ -873,6 +876,33 @@ export const RaportView: React.FC = () => {
                     </div>
                   </div>
                 )}
+
+                {/* Toggle Deskripsi Capaian Pembelajaran Mendalam (Khusus Rapor Mid Semester) */}
+                {isMidSemester && (
+                  <label
+                    className={`flex items-center gap-1.5 cursor-pointer select-none px-2.5 py-1 rounded-lg border transition-all text-xs font-bold ${
+                      printSettings.showMidDeskripsi !== false
+                        ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200'
+                        : 'bg-slate-100 dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                    }`}
+                    title="Centang untuk menampilkan kolom deskripsi capaian pembelajaran mendalam, atau hilangkan centang untuk mencetak rapor mid ringkas (hanya nilai STS)"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={printSettings.showMidDeskripsi !== false}
+                      onChange={e => setPrintSettings({ ...printSettings, showMidDeskripsi: e.target.checked })}
+                      className="rounded text-amber-600 focus:ring-amber-500"
+                    />
+                    <span className="flex items-center gap-1 text-[11.5px]">
+                      {printSettings.showMidDeskripsi !== false ? (
+                        <Eye className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+                      ) : (
+                        <EyeOff className="h-3.5 w-3.5 text-slate-500" />
+                      )}
+                      <span>Deskripsi Capaian</span>
+                    </span>
+                  </label>
+                )}
               </div>
 
               {/* Quick Navigation in Print Toolbar */}
@@ -914,6 +944,7 @@ export const RaportView: React.FC = () => {
                   student={s}
                   printSettings={printSettings}
                   isPageBreakAfter={idx < batchPrintStudents.length - 1}
+                  onToggleShowMidDeskripsi={val => setPrintSettings(prev => ({ ...prev, showMidDeskripsi: val }))}
                 />
               ))
             ) : (
@@ -921,6 +952,7 @@ export const RaportView: React.FC = () => {
               <StudentReportCardSheet
                 student={selectedStudent}
                 printSettings={printSettings}
+                onToggleShowMidDeskripsi={val => setPrintSettings(prev => ({ ...prev, showMidDeskripsi: val }))}
               />
             )}
           </div>
