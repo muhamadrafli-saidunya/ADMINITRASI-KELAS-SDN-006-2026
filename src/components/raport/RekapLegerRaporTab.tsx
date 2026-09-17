@@ -40,13 +40,15 @@ import { ModalCetakLeger } from './ModalCetakLeger';
 
 interface RekapLegerRaporTabProps {
   onSelectStudentForReport: (student: Student) => void;
+  initialPeriod?: 'semester' | 'mid_semester';
 }
 
 type LegerSubView = 'matrix' | 'leaderboard' | 'kenaikan';
 type SortOption = 'rank' | 'absen' | 'nama' | 'total' | 'avg' | string; // string for subject ID
 
 export const RekapLegerRaporTab: React.FC<RekapLegerRaporTabProps> = ({
-  onSelectStudentForReport
+  onSelectStudentForReport,
+  initialPeriod = 'semester'
 }) => {
   const {
     schoolInfo,
@@ -56,12 +58,19 @@ export const RekapLegerRaporTab: React.FC<RekapLegerRaporTabProps> = ({
     getStudentReport,
     updateStudentReport,
     bulkAutoCalculateRankings,
+    bulkAutoCalculateMidRankings,
     bulkSetKenaikanKelas,
     getAllGradesForStudent,
-    getStudentAttendanceStats
+    getAllMidSemesterGradesForStudent,
+    getStudentAttendanceStats,
+    getEffectiveStudentAttendance
   } = useApp();
 
   const isGenap = isSemesterGenap(schoolInfo.semester);
+
+  // Periode Leger: Akhir Semester atau Mid Semester (STS)
+  const [activePeriod, setActivePeriod] = useState<'semester' | 'mid_semester'>(initialPeriod);
+  const [printLegerPeriod, setPrintLegerPeriod] = useState<'semester' | 'mid_semester'>(initialPeriod);
 
   // Sub-view Tab State
   const [activeSubView, setActiveSubView] = useState<LegerSubView>('matrix');
@@ -85,34 +94,43 @@ export const RekapLegerRaporTab: React.FC<RekapLegerRaporTabProps> = ({
     schoolInfo.className.includes('4') ? 'V (Lima)' : schoolInfo.className.includes('5') ? 'VI (Enam)' : 'Kelas Lanjutan'
   );
 
+  const isMid = activePeriod === 'mid_semester';
+
   // Computed per-student data cache
   const studentDataList = useMemo(() => {
     return students.map(student => {
       const report = getStudentReport(student.id);
-      const studentGrades = getAllGradesForStudent(student.id);
-      const attStats = getStudentAttendanceStats(student.id);
+      const studentGrades = isMid
+        ? getAllMidSemesterGradesForStudent(student.id)
+        : getAllGradesForStudent(student.id);
 
-      const totalScore = studentGrades.reduce((sum, g) => sum + g.nilaiAkhir, 0);
-      const avgScore = studentGrades.length > 0 ? +(totalScore / studentGrades.length).toFixed(1) : 0;
-      const completedCount = studentGrades.filter(g => g.ketercapaian === 'Tuntas').length;
+      const attStats = getEffectiveStudentAttendance(student.id, isMid);
 
-      // Subject scores mapping by subject ID
-      const subjectScores: Record<string, number> = {};
-      studentGrades.forEach(g => {
-        subjectScores[g.subject.id] = g.nilaiAkhir;
-      });
-
-      // Best subject
+      let totalScore = 0;
+      let completedCount = 0;
       let bestSubject = '-';
       let maxSubScore = -1;
+      const subjectScores: Record<string, number> = {};
+
       studentGrades.forEach(g => {
-        if (g.nilaiAkhir > maxSubScore) {
-          maxSubScore = g.nilaiAkhir;
+        const score = isMid
+          ? ('nilaiAkhirMid' in g ? (g as any).nilaiAkhirMid : ('sumatifSts' in g ? (g as any).sumatifSts : 0))
+          : ('nilaiAkhir' in g ? (g as any).nilaiAkhir : 0);
+
+        subjectScores[g.subject.id] = score;
+        totalScore += score;
+        if (score >= (g.subject.kktp || 75)) completedCount++;
+        if (score > maxSubScore) {
+          maxSubScore = score;
           bestSubject = g.subject.nama;
         }
       });
 
-      const numericRank = report.ranking && !isNaN(Number(report.ranking)) ? Number(report.ranking) : 999;
+      const avgScore = studentGrades.length > 0 ? +(totalScore / studentGrades.length).toFixed(1) : 0;
+
+      const numericRank = isMid
+        ? (report.rankingMid && !isNaN(Number(report.rankingMid)) ? Number(report.rankingMid) : 999)
+        : (report.ranking && !isNaN(Number(report.ranking)) ? Number(report.ranking) : 999);
 
       return {
         student,
@@ -128,7 +146,16 @@ export const RekapLegerRaporTab: React.FC<RekapLegerRaporTabProps> = ({
         numericRank
       };
     });
-  }, [students, subjects, grades, getStudentReport, getAllGradesForStudent, getStudentAttendanceStats]);
+  }, [
+    students,
+    subjects,
+    grades,
+    isMid,
+    getStudentReport,
+    getAllGradesForStudent,
+    getAllMidSemesterGradesForStudent,
+    getEffectiveStudentAttendance
+  ]);
 
   // Filtered & Sorted Student List
   const processedStudents = useMemo(() => {
@@ -287,26 +314,58 @@ export const RekapLegerRaporTab: React.FC<RekapLegerRaporTabProps> = ({
   // Export to CSV / Excel
   const handleExportCSV = () => {
     try {
-      const headers = [
-        'No Absen',
-        'Nama Lengkap',
-        'NISN',
-        'Jenis Kelamin',
-        ...subjects.map(s => `Nilai ${s.nama} (${s.kode})`),
-        'Total Nilai',
-        'Rata-Rata Rapor',
-        'Ranking Kelas',
-        'Sakit (Hari)',
-        'Izin (Hari)',
-        'Alpa (Hari)',
-        'Status Kenaikan',
-        'Target Kelas'
-      ];
+      const headers = isMid
+        ? [
+            'No Absen',
+            'Nama Lengkap',
+            'NISN',
+            'Jenis Kelamin',
+            ...subjects.map(s => `Nilai STS ${s.nama} (${s.kode})`),
+            'Total Nilai STS',
+            'Rata-Rata STS',
+            'Peringkat Mid',
+            'Sakit (Hari)',
+            'Izin (Hari)',
+            'Alpa (Hari)',
+            'Catatan Wali Kelas Mid'
+          ]
+        : [
+            'No Absen',
+            'Nama Lengkap',
+            'NISN',
+            'Jenis Kelamin',
+            ...subjects.map(s => `Nilai ${s.nama} (${s.kode})`),
+            'Total Nilai',
+            'Rata-Rata Rapor',
+            'Ranking Kelas',
+            'Sakit (Hari)',
+            'Izin (Hari)',
+            'Alpa (Hari)',
+            'Status Kenaikan',
+            'Target Kelas'
+          ];
 
       const rows = studentDataList.map(item => {
         const s = item.student;
         const r = item.report;
         const subVals = subjects.map(sub => item.subjectScores[sub.id] ?? 0);
+
+        if (isMid) {
+          return [
+            s.nomorAbsen || '',
+            `"${s.nama.replace(/"/g, '""')}"`,
+            `'${s.nisn}`,
+            s.jenisKelamin === 'L' ? 'Laki-laki' : 'Perempuan',
+            ...subVals,
+            item.totalScore,
+            item.avgScore,
+            r.rankingMid ?? item.numericRank,
+            item.attStats.sakit,
+            item.attStats.izin,
+            item.attStats.alpa,
+            `"${(r.catatanWaliKelasMid || '').replace(/"/g, '""')}"`
+          ];
+        }
 
         return [
           s.nomorAbsen || '',
@@ -333,9 +392,10 @@ export const RekapLegerRaporTab: React.FC<RekapLegerRaporTabProps> = ({
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.setAttribute('href', url);
+      const periodLabel = isMid ? 'Mid_Semester_STS' : `Semester_${schoolInfo.semester.includes('1') ? '1' : '2'}`;
       link.setAttribute(
         'download',
-        `Leger_Nilai_${schoolInfo.className.replace(/\s+/g, '_')}_${schoolInfo.academicYear.replace(/[/\\?%*:|"<>]/g, '-')}_Semester_${schoolInfo.semester.includes('1') ? '1' : '2'}.csv`
+        `Leger_Nilai_${periodLabel}_${schoolInfo.className.replace(/\s+/g, '_')}_${schoolInfo.academicYear.replace(/[/\\?%*:|"<>]/g, '-')}.csv`
       );
       document.body.appendChild(link);
       link.click();
@@ -345,9 +405,18 @@ export const RekapLegerRaporTab: React.FC<RekapLegerRaporTabProps> = ({
     }
   };
 
-  const handlePrint = (mode?: 'matrix' | 'leaderboard' | 'kenaikan') => {
+  const handlePrint = (mode?: 'matrix' | 'leaderboard' | 'kenaikan', period?: 'semester' | 'mid_semester') => {
     setPrintLegerMode(mode || activeSubView);
+    setPrintLegerPeriod(period || activePeriod);
     setIsPrintLegerOpen(true);
+  };
+
+  const handleAutoCalculateRanking = () => {
+    if (isMid) {
+      bulkAutoCalculateMidRankings();
+    } else {
+      bulkAutoCalculateRankings();
+    }
   };
 
   const handleApplyBulk = () => {
@@ -357,6 +426,61 @@ export const RekapLegerRaporTab: React.FC<RekapLegerRaporTabProps> = ({
 
   return (
     <div className="space-y-6">
+      {/* Selector Mode Periode Leger: Akhir Semester vs Mid Semester */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-3.5 bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 text-white rounded-2xl shadow-sm print:hidden">
+        <div className="flex items-center gap-3">
+          <div className={`flex h-10 w-10 items-center justify-center rounded-xl shadow-xs ${isMid ? 'bg-amber-500 text-white' : 'bg-blue-600 text-white'}`}>
+            {isMid ? <Sparkles className="h-5 w-5" /> : <BookOpen className="h-5 w-5" />}
+          </div>
+          <div>
+            <h2 className="text-sm font-black flex items-center gap-2">
+              <span>{isMid ? 'Leger Nilai Mid Semester (STS)' : 'Leger Nilai Akhir Semester (KMPM)'}</span>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider ${isMid ? 'bg-amber-400 text-amber-950' : 'bg-blue-400 text-blue-950'}`}>
+                {isMid ? 'Mode STS' : 'Mode Akhir Semester'}
+              </span>
+            </h2>
+            <p className="text-xs text-slate-300">
+              {isMid
+                ? 'Menampilkan rekapitulasi nilai Sumatif Tengah Semester (STS) beserta absensi dan catatan wali kelas mid.'
+                : 'Menampilkan rekapitulasi nilai akhir rapor, ketuntasan KKTP, ranking se-kelas, dan kenaikan kelas.'}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1.5 p-1 bg-slate-950/60 rounded-xl border border-white/10 shrink-0">
+          <button
+            type="button"
+            onClick={() => {
+              setActivePeriod('semester');
+              setPrintLegerPeriod('semester');
+            }}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              !isMid
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-300 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <BookOpen className="h-3.5 w-3.5" />
+            <span>Leger Akhir Semester</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActivePeriod('mid_semester');
+              setPrintLegerPeriod('mid_semester');
+            }}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              isMid
+                ? 'bg-amber-500 text-slate-950 shadow-xs'
+                : 'text-slate-300 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            <span>Leger Mid Semester (STS)</span>
+          </button>
+        </div>
+      </div>
+
       {/* 1. Header Stat Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 print:hidden">
         <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3.5 shadow-xs">
@@ -374,7 +498,9 @@ export const RekapLegerRaporTab: React.FC<RekapLegerRaporTabProps> = ({
 
         <div className="rounded-2xl border border-indigo-200 dark:border-indigo-900/50 bg-indigo-50/40 dark:bg-indigo-950/20 p-3.5 shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold text-indigo-700 dark:text-indigo-300 uppercase tracking-wider">Rata-Rata Kelas</span>
+            <span className="text-[10px] font-bold text-indigo-700 dark:text-indigo-300 uppercase tracking-wider">
+              {isMid ? 'Rata-Rata STS Mid' : 'Rata-Rata Kelas'}
+            </span>
             <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300">
               <TrendingUp className="h-3.5 w-3.5" />
             </div>
@@ -382,12 +508,16 @@ export const RekapLegerRaporTab: React.FC<RekapLegerRaporTabProps> = ({
           <p className="text-xl font-black text-indigo-700 dark:text-indigo-300 mt-1">
             {classStats.overallAvg} <span className="text-xs font-normal text-indigo-500">/ 100</span>
           </p>
-          <p className="text-[10px] text-indigo-600 dark:text-indigo-400 truncate mt-0.5">{subjects.length} Mata Pelajaran</p>
+          <p className="text-[10px] text-indigo-600 dark:text-indigo-400 truncate mt-0.5">
+            {subjects.length} Mata Pelajaran {isMid ? '(STS)' : ''}
+          </p>
         </div>
 
         <div className="rounded-2xl border border-amber-200 dark:border-amber-900/50 bg-amber-50/40 dark:bg-amber-950/20 p-3.5 shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300 uppercase tracking-wider">Juara 1 Kelas</span>
+            <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300 uppercase tracking-wider">
+              {isMid ? 'Juara 1 Mid (STS)' : 'Juara 1 Kelas'}
+            </span>
             <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300">
               <Trophy className="h-3.5 w-3.5" />
             </div>
@@ -402,7 +532,9 @@ export const RekapLegerRaporTab: React.FC<RekapLegerRaporTabProps> = ({
 
         <div className="rounded-2xl border border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/40 dark:bg-emerald-950/20 p-3.5 shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-300 uppercase tracking-wider">Nilai Tertinggi</span>
+            <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-300 uppercase tracking-wider">
+              {isMid ? 'Nilai Tertinggi STS' : 'Nilai Tertinggi'}
+            </span>
             <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300">
               <Star className="h-3.5 w-3.5" />
             </div>
@@ -410,12 +542,14 @@ export const RekapLegerRaporTab: React.FC<RekapLegerRaporTabProps> = ({
           <p className="text-xl font-black text-emerald-700 dark:text-emerald-300 mt-1">
             {classStats.highestTotal} <span className="text-xs font-normal text-emerald-600">Poin</span>
           </p>
-          <p className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5">Akumulasi Maksimum</p>
+          <p className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5">Akumulasi Maksimum {isMid ? 'STS' : ''}</p>
         </div>
 
         <div className="rounded-2xl border border-purple-200 dark:border-purple-900/50 bg-purple-50/40 dark:bg-purple-950/20 p-3.5 shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold text-purple-700 dark:text-purple-300 uppercase tracking-wider">Predikat A & B</span>
+            <span className="text-[10px] font-bold text-purple-700 dark:text-purple-300 uppercase tracking-wider">
+              {isMid ? 'Predikat STS (A & B)' : 'Predikat A & B'}
+            </span>
             <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300">
               <Award className="h-3.5 w-3.5" />
             </div>
@@ -432,17 +566,17 @@ export const RekapLegerRaporTab: React.FC<RekapLegerRaporTabProps> = ({
         <div className="rounded-2xl border border-blue-200 dark:border-blue-900/50 bg-blue-50/40 dark:bg-blue-950/20 p-3.5 shadow-xs">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-bold text-blue-700 dark:text-blue-300 uppercase tracking-wider">
-              {isGenap ? 'Kenaikan Kelas' : 'Semester 1'}
+              {isMid ? 'Status Asesmen' : isGenap ? 'Kenaikan Kelas' : 'Semester 1'}
             </span>
             <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300">
               <GraduationCap className="h-3.5 w-3.5" />
             </div>
           </div>
           <p className="text-xl font-black text-blue-700 dark:text-blue-300 mt-1">
-            {isGenap ? `${classStats.countNaik + classStats.countLulus} Naik` : 'Smt Ganjil'}
+            {isMid ? 'Mid Smt (STS)' : isGenap ? `${classStats.countNaik + classStats.countLulus} Naik` : 'Smt Ganjil'}
           </p>
           <p className="text-[10px] text-blue-600 dark:text-blue-400 mt-0.5">
-            {isGenap ? `${classStats.countTinggal} Tinggal Kelas` : 'Penentuan di Smt 2'}
+            {isMid ? 'Asesmen Tengah Smt' : isGenap ? `${classStats.countTinggal} Tinggal Kelas` : 'Penentuan di Smt 2'}
           </p>
         </div>
       </div>
@@ -462,7 +596,7 @@ export const RekapLegerRaporTab: React.FC<RekapLegerRaporTabProps> = ({
               }`}
             >
               <FileSpreadsheet className="h-3.5 w-3.5" />
-              <span>Matriks Leger Nilai Mapel</span>
+              <span>{isMid ? 'Matriks Leger Nilai STS' : 'Matriks Leger Nilai Mapel'}</span>
             </button>
 
             <button
@@ -475,7 +609,7 @@ export const RekapLegerRaporTab: React.FC<RekapLegerRaporTabProps> = ({
               }`}
             >
               <Trophy className="h-3.5 w-3.5" />
-              <span>Podium & Peringkat Kelas</span>
+              <span>{isMid ? 'Podium & Peringkat Mid' : 'Podium & Peringkat Kelas'}</span>
             </button>
 
             <button
@@ -496,12 +630,12 @@ export const RekapLegerRaporTab: React.FC<RekapLegerRaporTabProps> = ({
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={bulkAutoCalculateRankings}
+              onClick={handleAutoCalculateRanking}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 active:scale-95 text-white rounded-xl text-xs font-bold shadow-xs transition-all"
-              title="Urutkan ranking 1-N otomatis berdasarkan total perolehan nilai rapor"
+              title={isMid ? "Hitung ranking mid semester otomatis berdasarkan akumulasi nilai STS" : "Urutkan ranking 1-N otomatis berdasarkan total perolehan nilai rapor"}
             >
               <TrendingUp className="h-3.5 w-3.5" />
-              <span>Hitung Ulang Ranking Otomatis</span>
+              <span>{isMid ? 'Hitung Ranking Mid Otomatis' : 'Hitung Ulang Ranking Otomatis'}</span>
             </button>
 
             <button
@@ -516,12 +650,14 @@ export const RekapLegerRaporTab: React.FC<RekapLegerRaporTabProps> = ({
 
             <button
               type="button"
-              onClick={handlePrint}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 active:scale-95 text-white rounded-xl text-xs font-bold shadow-xs transition-all"
-              title="Cetak format cetak leger resmi Kurikulum Merdeka Pembelajaran Mendalam (KMPM)"
+              onClick={() => handlePrint(activeSubView, activePeriod)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold shadow-xs transition-all active:scale-95 text-white ${
+                isMid ? 'bg-amber-600 hover:bg-amber-700' : 'bg-slate-800 hover:bg-slate-700'
+              }`}
+              title={isMid ? "Cetak leger nilai Asesmen Sumatif Tengah Semester (STS)" : "Cetak format cetak leger resmi Kurikulum Merdeka Pembelajaran Mendalam (KMPM)"}
             >
               <Printer className="h-3.5 w-3.5" />
-              <span>Cetak Leger</span>
+              <span>{isMid ? 'Cetak Leger Mid (STS)' : 'Cetak Leger'}</span>
             </button>
           </div>
         </div>
@@ -620,7 +756,9 @@ export const RekapLegerRaporTab: React.FC<RekapLegerRaporTabProps> = ({
       {/* 3. Printable Kop & Header (Hanya muncul saat cetak) */}
       <div className="hidden print:block mb-4 text-center border-b-2 border-black pb-2">
         <h1 className="text-base font-black uppercase tracking-wider">
-          LEGER REKAPITULASI HASIL BELAJAR PESERTA DIDIK (RAPOR KMPM)
+          {isMid
+            ? 'LEGER REKAPITULASI NILAI ASESMEN SUMATIF TENGAH SEMESTER (STS)'
+            : 'LEGER REKAPITULASI HASIL BELAJAR PESERTA DIDIK (RAPOR KMPM)'}
         </h1>
         <h2 className="text-xs font-bold uppercase tracking-wide text-slate-800">
           KURIKULUM MERDEKA PEMBELAJARAN MENDALAM (KMPM) &bull; {schoolInfo.schoolName.toUpperCase()}
@@ -654,7 +792,9 @@ export const RekapLegerRaporTab: React.FC<RekapLegerRaporTabProps> = ({
                       colSpan={subjects.length}
                       className="py-2 px-3 text-center border-r border-slate-200 dark:border-slate-700 bg-blue-50/80 dark:bg-blue-950/40 text-blue-900 dark:text-blue-200 font-extrabold"
                     >
-                      Mata Pelajaran (Nilai Akhir Rapor & KKTP)
+                      {isMid
+                        ? 'Mata Pelajaran (Nilai Asesmen Sumatif Tengah Semester / STS)'
+                        : 'Mata Pelajaran (Nilai Akhir Rapor & KKTP)'}
                     </th>
 
                     <th rowSpan={2} className="py-3 px-2.5 text-center w-16 bg-blue-100/70 dark:bg-blue-950/70 text-blue-950 dark:text-blue-200 font-black border-r border-slate-200 dark:border-slate-700">
@@ -664,7 +804,7 @@ export const RekapLegerRaporTab: React.FC<RekapLegerRaporTabProps> = ({
                       Rata²
                     </th>
                     <th rowSpan={2} className="py-3 px-3 text-center min-w-[100px] bg-amber-100/80 dark:bg-amber-950/60 text-amber-950 dark:text-amber-200 font-black border-r border-slate-200 dark:border-slate-700">
-                      Peringkat
+                      {isMid ? 'Peringkat Mid' : 'Peringkat'}
                     </th>
 
                     {/* Presensi Header */}
@@ -673,7 +813,7 @@ export const RekapLegerRaporTab: React.FC<RekapLegerRaporTabProps> = ({
                     </th>
 
                     <th rowSpan={2} className="py-3 px-3 min-w-[130px] bg-emerald-50/70 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-200 font-bold border-r border-slate-200 dark:border-slate-700">
-                      Status {isGenap ? 'Kenaikan' : 'Capaian'}
+                      {isMid ? 'Catatan Mid (STS)' : `Status ${isGenap ? 'Kenaikan' : 'Capaian'}`}
                     </th>
 
                     <th rowSpan={2} className="py-3 px-3 text-center min-w-[110px] print:hidden">
@@ -816,11 +956,17 @@ export const RekapLegerRaporTab: React.FC<RekapLegerRaporTabProps> = ({
                           <div className="flex items-center justify-center gap-1">
                             <input
                               type="text"
-                              value={r.ranking ?? ''}
+                              value={isMid ? (r.rankingMid ?? '') : (r.ranking ?? '')}
                               onChange={e => {
-                                updateStudentReport(s.id, {
-                                  ranking: e.target.value
-                                });
+                                if (isMid) {
+                                  updateStudentReport(s.id, {
+                                    rankingMid: e.target.value
+                                  });
+                                } else {
+                                  updateStudentReport(s.id, {
+                                    ranking: e.target.value
+                                  });
+                                }
                               }}
                               placeholder="-"
                               className="w-12 text-center py-1 px-1 rounded-lg border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-800 text-xs font-black text-amber-950 dark:text-amber-200 focus:ring-2 focus:ring-amber-500 outline-none"
@@ -844,19 +990,32 @@ export const RekapLegerRaporTab: React.FC<RekapLegerRaporTabProps> = ({
                           {item.attStats.alpa}
                         </td>
 
-                        {/* Status Kenaikan */}
+                        {/* Status Kenaikan / Catatan Mid */}
                         <td className="py-2.5 px-3 border-r border-slate-100 dark:border-slate-800">
-                          <span
-                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                              r.statusKenaikan === 'Naik Kelas' || r.statusKenaikan === 'Lulus'
-                                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                                : r.statusKenaikan === 'Tinggal Kelas'
-                                ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
-                                : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
-                            }`}
-                          >
-                            {r.statusKenaikan || 'Naik Kelas'}
-                          </span>
+                          {isMid ? (
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold truncate max-w-[140px] inline-block ${
+                                item.avgScore >= 75
+                                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                  : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                              }`}
+                              title={r.catatanWaliKelasMid || (item.avgScore >= 75 ? 'Tuntas Capaian STS' : 'Perlu Pendampingan STS')}
+                            >
+                              {r.catatanWaliKelasMid || (item.avgScore >= 75 ? 'Tuntas STS' : 'Perlu Pendampingan')}
+                            </span>
+                          ) : (
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                r.statusKenaikan === 'Naik Kelas' || r.statusKenaikan === 'Lulus'
+                                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                  : r.statusKenaikan === 'Tinggal Kelas'
+                                  ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                                  : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                              }`}
+                            >
+                              {r.statusKenaikan || 'Naik Kelas'}
+                            </span>
+                          )}
                         </td>
 
                         {/* Aksi */}

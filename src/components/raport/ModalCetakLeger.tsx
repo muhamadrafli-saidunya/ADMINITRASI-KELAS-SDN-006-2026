@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { isSemesterGenap } from '../../types';
 import { HeaderKopSekolah } from '../common/HeaderKopSekolah';
@@ -9,23 +9,25 @@ import {
   Trophy,
   GraduationCap,
   Calendar,
-  CheckSquare,
-  Square,
   SlidersHorizontal,
-  Download,
-  Info
+  Info,
+  Clock,
+  BookOpen,
+  Sparkles
 } from 'lucide-react';
 
 interface ModalCetakLegerProps {
   isOpen: boolean;
   onClose: () => void;
   defaultMode?: 'matrix' | 'leaderboard' | 'kenaikan';
+  defaultPeriod?: 'semester' | 'mid_semester';
 }
 
 export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
   isOpen,
   onClose,
-  defaultMode = 'matrix'
+  defaultMode = 'matrix',
+  defaultPeriod = 'semester'
 }) => {
   const {
     schoolInfo,
@@ -33,23 +35,30 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
     subjects,
     getStudentReport,
     getAllGradesForStudent,
-    getStudentAttendanceStats
+    getAllMidSemesterGradesForStudent,
+    getEffectiveStudentAttendance
   } = useApp();
 
   const isGenap = isSemesterGenap(schoolInfo.semester);
 
-  // Tab mode
+  // Periode Leger: Akhir Semester atau Mid Semester (STS)
+  const [reportPeriod, setReportPeriod] = useState<'semester' | 'mid_semester'>(defaultPeriod);
+
+  // Tab format mode
   const [printMode, setPrintMode] = useState<'matrix' | 'leaderboard' | 'kenaikan'>(defaultMode);
 
   // Orientation & paper options
   const [pageOrientation, setPageOrientation] = useState<'landscape' | 'portrait'>(
     defaultMode === 'matrix' ? 'landscape' : 'portrait'
   );
+  const [paperSize, setPaperSize] = useState<'a4' | 'f4'>('a4');
+  const [printScale, setPrintScale] = useState<'normal' | 'compact' | 'ultra_compact'>('compact');
 
   // Print customization options
   const [showSignature, setShowSignature] = useState(true);
   const [showAttendance, setShowAttendance] = useState(true);
   const [showStatsFooter, setShowStatsFooter] = useState(true);
+  const [showNisn, setShowNisn] = useState(true);
   const [sortBy, setSortBy] = useState<'absen' | 'rank' | 'nama' | 'total'>('absen');
   const [customReportDate, setCustomReportDate] = useState(
     schoolInfo.reportDate ||
@@ -60,34 +69,58 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
       })
   );
 
-  // Computed per-student dataset
+  // Sync with default props when opening
+  useEffect(() => {
+    if (isOpen) {
+      if (defaultPeriod) setReportPeriod(defaultPeriod);
+      if (defaultMode) setPrintMode(defaultMode);
+    }
+  }, [isOpen, defaultPeriod, defaultMode]);
+
+  // If mid semester is selected, prevent kenaikan mode (only available in full semester)
+  useEffect(() => {
+    if (reportPeriod === 'mid_semester' && printMode === 'kenaikan') {
+      setPrintMode('matrix');
+    }
+  }, [reportPeriod, printMode]);
+
+  const isMid = reportPeriod === 'mid_semester';
+
+  // Computed per-student dataset based on selected period
   const computedList = useMemo(() => {
     return students.map(student => {
       const report = getStudentReport(student.id);
-      const studentGrades = getAllGradesForStudent(student.id);
-      const attStats = getStudentAttendanceStats(student.id);
+      const studentGrades = isMid
+        ? getAllMidSemesterGradesForStudent(student.id)
+        : getAllGradesForStudent(student.id);
 
-      const totalScore = studentGrades.reduce((sum, g) => sum + g.nilaiAkhir, 0);
-      const avgScore =
-        studentGrades.length > 0 ? +(totalScore / studentGrades.length).toFixed(1) : 0;
-      const completedCount = studentGrades.filter(
-        g => g.nilaiAkhir >= (g.subject.kktp || 75)
-      ).length;
+      const attStats = getEffectiveStudentAttendance(student.id, isMid);
 
       const subjectScores: Record<string, number> = {};
-      studentGrades.forEach(g => {
-        subjectScores[g.subject.id] = g.nilaiAkhir;
-      });
-
-      // Best subject
+      let totalScore = 0;
+      let completedCount = 0;
       let bestSubject = '-';
       let maxScore = -1;
+
       studentGrades.forEach(g => {
-        if (g.nilaiAkhir > maxScore) {
-          maxScore = g.nilaiAkhir;
+        // For mid semester: use nilaiAkhirMid / sumatifSts
+        const score = isMid
+          ? ('nilaiAkhirMid' in g ? (g as any).nilaiAkhirMid : ('sumatifSts' in g ? (g as any).sumatifSts : 0))
+          : ('nilaiAkhir' in g ? (g as any).nilaiAkhir : 0);
+
+        subjectScores[g.subject.id] = score;
+        totalScore += score;
+        if (score >= (g.subject.kktp || 75)) {
+          completedCount++;
+        }
+        if (score > maxScore) {
+          maxScore = score;
           bestSubject = g.subject.nama;
         }
       });
+
+      const avgScore =
+        studentGrades.length > 0 ? +(totalScore / studentGrades.length).toFixed(1) : 0;
 
       // Predicate based on average
       let predicate = 'C';
@@ -96,8 +129,9 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
       else if (avgScore >= 70) predicate = 'C';
       else predicate = 'D';
 
-      const numericRank =
-        report.ranking && !isNaN(Number(report.ranking)) ? Number(report.ranking) : 999;
+      const numericRank = isMid
+        ? (report.rankingMid && !isNaN(Number(report.rankingMid)) ? Number(report.rankingMid) : 999)
+        : (report.ranking && !isNaN(Number(report.ranking)) ? Number(report.ranking) : 999);
 
       return {
         student,
@@ -114,7 +148,15 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
         numericRank
       };
     });
-  }, [students, subjects, getStudentReport, getAllGradesForStudent, getStudentAttendanceStats]);
+  }, [
+    students,
+    subjects,
+    isMid,
+    getStudentReport,
+    getAllGradesForStudent,
+    getAllMidSemesterGradesForStudent,
+    getEffectiveStudentAttendance
+  ]);
 
   // Sorted list for printout
   const sortedStudents = useMemo(() => {
@@ -224,38 +266,138 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
   };
 
   const getDocTitle = () => {
+    if (isMid) {
+      if (printMode === 'matrix') return 'LEGER NILAI ASESMEN SUMATIF TENGAH SEMESTER (STS)';
+      if (printMode === 'leaderboard') return 'DAFTAR PERINGKAT & PRESTASI MID SEMESTER (STS)';
+      return 'LEGER NILAI MID SEMESTER (STS)';
+    }
     if (printMode === 'matrix') return 'LEGER NILAI & REKAPITULASI HASIL BELAJAR PESERTA DIDIK (KMPM)';
     if (printMode === 'leaderboard') return 'DAFTAR PERINGKAT & PRESTASI HASIL BELAJAR SE-KELAS (KMPM)';
     return 'REKAPITULASI KEPUTUSAN KENAIKAN KELAS & KELULUSAN (KMPM)';
   };
 
   const getDocSubtitle = () => {
-    return `KURIKULUM MERDEKA PEMBELAJARAN MENDALAM (KMPM) • Kelas: ${schoolInfo.className} • Fase: ${schoolInfo.phase || 'B'} • Semester: ${schoolInfo.semester} • Tahun Ajaran: ${schoolInfo.academicYear}`;
+    const semText = isMid ? `Tengah Semester ${schoolInfo.semester}` : `Semester ${schoolInfo.semester}`;
+    return `KURIKULUM MERDEKA PEMBELAJARAN MENDALAM (KMPM) • Kelas: ${schoolInfo.className} • Fase: ${schoolInfo.phase || 'B'} • ${semText} • Tahun Ajaran: ${schoolInfo.academicYear}`;
   };
+
+  // Dimensions for @page in CSS
+  const pageDimensionStr = paperSize === 'f4'
+    ? (pageOrientation === 'landscape' ? '330mm 215mm' : '215mm 330mm')
+    : (pageOrientation === 'landscape' ? '297mm 210mm' : '210mm 297mm');
+
+  // Font sizing and density classes
+  const getScaleStyles = () => {
+    if (printScale === 'ultra_compact') {
+      return {
+        tableText: 'text-[7.5px] leading-tight',
+        thPad: 'p-0.5',
+        tdPad: 'p-0.5',
+        mapelColWidth: 'min-w-[24px] max-w-[32px] p-0.5',
+        nameText: 'text-[8.5px] font-bold leading-tight',
+        nisnText: 'text-[7px] text-slate-500 font-mono',
+        badgeText: 'text-[7px]',
+        signGap: 'h-11'
+      };
+    }
+    if (printScale === 'compact') {
+      return {
+        tableText: 'text-[8.5px] leading-tight',
+        thPad: 'p-1',
+        tdPad: 'p-0.5 sm:p-1',
+        mapelColWidth: 'min-w-[28px] max-w-[38px] p-0.5',
+        nameText: 'text-[9.5px] font-bold leading-tight',
+        nisnText: 'text-[7.5px] text-slate-500 font-mono',
+        badgeText: 'text-[7.5px]',
+        signGap: 'h-14'
+      };
+    }
+    // Normal
+    return {
+      tableText: 'text-[9.5px] leading-snug',
+      thPad: 'p-1 sm:p-1.5',
+      tdPad: 'p-1 sm:p-1.5',
+      mapelColWidth: 'min-w-[34px] max-w-[44px] p-1',
+      nameText: 'text-[10px] font-bold leading-tight',
+      nisnText: 'text-[8px] text-slate-500 font-mono',
+      badgeText: 'text-[8px]',
+      signGap: 'h-16'
+    };
+  };
+
+  const scale = getScaleStyles();
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-2 sm:p-4 backdrop-blur-xs print:p-0 print:m-0 print:static print:block print:overflow-visible print:bg-transparent print:z-auto">
-      {/* Injected Print Page Rule for Orientation */}
+      {/* Dynamic Print CSS for Page Sizing, Paper Fitting & Repeating Headers */}
       <style>{`
         @media print {
           @page {
-            size: ${pageOrientation} !important;
-            margin: 8mm 8mm 8mm 8mm !important;
+            size: ${pageDimensionStr} !important;
+            margin: 5mm 6mm 5mm 6mm !important;
+          }
+          *, *::before, *::after {
+            color-adjust: exact !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          html, body {
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: white !important;
+            color: black !important;
+          }
+          .printable-document-sheet {
+            width: 100% !important;
+            max-width: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            border: none !important;
+            box-shadow: none !important;
+          }
+          table {
+            width: 100% !important;
+            table-layout: auto !important;
+            border-collapse: collapse !important;
+            page-break-inside: auto !important;
+          }
+          thead {
+            display: table-header-group !important;
+          }
+          tfoot {
+            display: table-footer-group !important;
+          }
+          tr {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+          th, td {
+            border: 1px solid #000 !important;
+          }
+          .page-break-inside-avoid {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
           }
         }
       `}</style>
 
       <div className="relative w-full max-w-6xl max-h-[96vh] flex flex-col rounded-2xl bg-slate-100 dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden animate-in fade-in zoom-in-95 duration-150 print:max-h-none print:w-full print:max-w-none print:border-none print:shadow-none print:rounded-none print:m-0 print:p-0 print:static print:bg-transparent print:overflow-visible print:animate-none">
         {/* Top Header Toolbar */}
-        <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-5 py-3.5 no-print print:hidden shrink-0">
+        <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 sm:px-5 py-3 no-print print:hidden shrink-0">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+            <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${isMid ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300' : 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300'}`}>
               <Printer className="h-5 w-5" />
             </div>
             <div>
-              <h2 className="text-base font-black text-slate-900 dark:text-white">
-                Pratinjau & Cetak Leger Rapor Kelas
-              </h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-black text-slate-900 dark:text-white">
+                  Pratinjau & Cetak Leger Rapor Kelas
+                </h2>
+                <span className={`text-[10.5px] font-bold px-2 py-0.5 rounded-full ${isMid ? 'bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-200 border border-amber-300' : 'bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-200 border border-blue-300'}`}>
+                  {isMid ? 'Tengah Semester (STS)' : 'Akhir Semester'}
+                </span>
+              </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 Format resmi Kurikulum Merdeka Pembelajaran Mendalam (KMPM) • Kelas {schoolInfo.className} • {schoolInfo.academicYear}
               </p>
@@ -266,7 +408,11 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
             <button
               type="button"
               onClick={handlePrintDocument}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-xs font-bold shadow-md shadow-blue-600/20 transition-all cursor-pointer"
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-white text-xs font-bold shadow-md transition-all cursor-pointer ${
+                isMid
+                  ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/20 active:scale-95'
+                  : 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/20 active:scale-95'
+              }`}
             >
               <Printer className="h-4 w-4" />
               <span>Cetak Sekarang (Print / PDF)</span>
@@ -283,9 +429,42 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
 
         {/* Options & Tab Bar */}
         <div className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 p-3 sm:px-5 no-print print:hidden space-y-3 shrink-0 text-xs">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+          {/* Row 1: Periode & Format Selection */}
+          <div className="flex flex-wrap items-center justify-between gap-2.5">
+            {/* Periode Switcher */}
+            <div className="flex items-center gap-1 p-1 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xs">
+              <span className="text-[11px] font-bold text-slate-500 px-2 flex items-center gap-1">
+                <Clock className="h-3.5 w-3.5 text-slate-400" />
+                <span>Periode:</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setReportPeriod('semester')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold text-xs transition-all ${
+                  reportPeriod === 'semester'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <BookOpen className="h-3.5 w-3.5" />
+                <span>Rapor Akhir Semester</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setReportPeriod('mid_semester')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold text-xs transition-all ${
+                  reportPeriod === 'mid_semester'
+                    ? 'bg-amber-600 text-white shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                <span>Mid Semester (STS)</span>
+              </button>
+            </div>
+
             {/* Format Selection Tabs */}
-            <div className="flex items-center gap-1.5 bg-white dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-700">
+            <div className="flex items-center gap-1 bg-white dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-700 shadow-2xs">
               <button
                 type="button"
                 onClick={() => {
@@ -295,12 +474,12 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
                 }}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all ${
                   printMode === 'matrix'
-                    ? 'bg-blue-600 text-white shadow-xs'
+                    ? (isMid ? 'bg-amber-600 text-white shadow-xs' : 'bg-blue-600 text-white shadow-xs')
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 <FileSpreadsheet className="h-3.5 w-3.5" />
-                <span>Leger Nilai Lengkap</span>
+                <span>{isMid ? 'Leger Mid Lengkap' : 'Leger Nilai Lengkap'}</span>
               </button>
 
               <button
@@ -317,32 +496,36 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
                 }`}
               >
                 <Trophy className="h-3.5 w-3.5" />
-                <span>Daftar Peringkat & Prestasi</span>
+                <span>Daftar Peringkat</span>
               </button>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setPrintMode('kenaikan');
-                  setSortBy('absen');
-                  setPageOrientation('portrait');
-                }}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all ${
-                  printMode === 'kenaikan'
-                    ? 'bg-emerald-600 text-white shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                <GraduationCap className="h-3.5 w-3.5" />
-                <span>Rekap Kenaikan / Kelulusan</span>
-              </button>
+              {!isMid && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPrintMode('kenaikan');
+                    setSortBy('absen');
+                    setPageOrientation('portrait');
+                  }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all ${
+                    printMode === 'kenaikan'
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <GraduationCap className="h-3.5 w-3.5" />
+                  <span>Kenaikan / Kelulusan</span>
+                </button>
+              )}
             </div>
+          </div>
 
-            {/* Print Customization Controls */}
-            <div className="flex flex-wrap items-center gap-3">
+          {/* Row 2: Page Fitting & Layout Tuning Controls */}
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-1 border-t border-slate-200 dark:border-slate-700">
+            <div className="flex flex-wrap items-center gap-2.5">
               {/* Orientasi Kertas */}
               <div className="flex items-center gap-1.5">
-                <span className="text-slate-500 font-medium">Orientasi:</span>
+                <span className="text-slate-500 font-semibold">Orientasi:</span>
                 <select
                   value={pageOrientation}
                   onChange={e => setPageOrientation(e.target.value as any)}
@@ -353,9 +536,37 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
                 </select>
               </div>
 
+              {/* Ukuran Kertas */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-slate-500 font-semibold">Kertas:</span>
+                <select
+                  value={paperSize}
+                  onChange={e => setPaperSize(e.target.value as any)}
+                  className="rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-2 py-1 text-xs font-bold text-slate-800 dark:text-slate-200 outline-none"
+                >
+                  <option value="a4">A4 (210 × 297 mm)</option>
+                  <option value="f4">F4 / Folio (215 × 330 mm)</option>
+                </select>
+              </div>
+
+              {/* Kerapatan / Skala Cetak agar Muat Halaman */}
+              <div className="flex items-center gap-1.5" title="Atur kerapatan font dan padding agar tabel muat sempurna di 1 lembar">
+                <SlidersHorizontal className="h-3.5 w-3.5 text-slate-400" />
+                <span className="text-slate-500 font-semibold">Kerapatan:</span>
+                <select
+                  value={printScale}
+                  onChange={e => setPrintScale(e.target.value as any)}
+                  className="rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-2 py-1 text-xs font-bold text-slate-800 dark:text-slate-200 outline-none"
+                >
+                  <option value="compact">Kompak (Sesuai Standar Mapel)</option>
+                  <option value="ultra_compact">Sangat Kompak (Banyak Mapel/Siswa)</option>
+                  <option value="normal">Normal</option>
+                </select>
+              </div>
+
               {/* Urutan */}
               <div className="flex items-center gap-1.5">
-                <span className="text-slate-500 font-medium">Urutan:</span>
+                <span className="text-slate-500 font-semibold">Urutkan:</span>
                 <select
                   value={sortBy}
                   onChange={e => setSortBy(e.target.value as any)}
@@ -367,19 +578,33 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
                   <option value="nama">Nama Siswa</option>
                 </select>
               </div>
+            </div>
 
+            {/* Print Feature Toggles */}
+            <div className="flex flex-wrap items-center gap-3">
               {/* Tanggal Titimangsa */}
               <div className="flex items-center gap-1.5">
                 <Calendar className="h-3.5 w-3.5 text-slate-400" />
-                <span className="text-slate-500 font-medium">Titimangsa:</span>
+                <span className="text-slate-500 font-semibold">Titimangsa:</span>
                 <input
                   type="text"
                   value={customReportDate}
                   onChange={e => setCustomReportDate(e.target.value)}
                   placeholder="Contoh: 15 Juli 2025"
-                  className="w-36 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-2 py-1 text-xs font-medium text-slate-800 dark:text-slate-200 outline-none"
+                  className="w-32 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-2 py-1 text-xs font-medium text-slate-800 dark:text-slate-200 outline-none"
                 />
               </div>
+
+              {/* Toggle NISN */}
+              <label className="flex items-center gap-1.5 cursor-pointer text-slate-700 dark:text-slate-300 font-medium select-none">
+                <input
+                  type="checkbox"
+                  checked={showNisn}
+                  onChange={e => setShowNisn(e.target.checked)}
+                  className="rounded text-blue-600"
+                />
+                <span>NISN</span>
+              </label>
 
               {/* Toggle Tanda Tangan */}
               <label className="flex items-center gap-1.5 cursor-pointer text-slate-700 dark:text-slate-300 font-medium select-none">
@@ -411,7 +636,7 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
                       onChange={e => setShowStatsFooter(e.target.checked)}
                       className="rounded text-blue-600"
                     />
-                    <span>Ringkasan Statistik</span>
+                    <span>Statistik</span>
                   </label>
                 </>
               )}
@@ -423,16 +648,17 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
         <div className="flex-1 overflow-y-auto p-3 sm:p-6 custom-scrollbar bg-slate-200/60 dark:bg-slate-950 print:p-0 print:m-0 print:overflow-visible print:bg-transparent print:block">
           <div
             id="printable-official-document"
-            className="printable-document-sheet max-w-[1100px] mx-auto bg-white p-6 sm:p-8 rounded-2xl shadow-md border border-slate-300 text-black print:border-none print:shadow-none print:p-0 print:m-0 print:w-full print:max-w-none font-sans print:text-black print:bg-white"
+            className="printable-document-sheet max-w-[1150px] mx-auto bg-white p-5 sm:p-8 rounded-2xl shadow-md border border-slate-300 text-black print:border-none print:shadow-none print:p-0 print:m-0 print:w-full print:max-w-none font-sans print:text-black print:bg-white"
           >
             {/* 1. Header Kop Surat Resmi */}
             <HeaderKopSekolah
               documentTitle={getDocTitle()}
               subTitle={getDocSubtitle()}
+              logoSize={pageOrientation === 'landscape' ? 56 : 64}
             />
 
             {/* 2. Metadata Information Block */}
-            <div className="grid grid-cols-2 text-[10.5px] leading-tight mb-3 text-black">
+            <div className="grid grid-cols-2 text-[10px] sm:text-[10.5px] leading-tight mb-2.5 text-black border-b border-black pb-1.5">
               <div className="space-y-0.5">
                 <p>
                   <strong>Satuan Pendidikan:</strong> {schoolInfo.schoolName}
@@ -441,8 +667,7 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
                   <strong>Kelas / Fase:</strong> {schoolInfo.className} / {schoolInfo.phase || 'Fase B'}
                 </p>
                 <p>
-                  <strong>Semester:</strong> {schoolInfo.semester} (
-                  {isGenap ? 'Semester Genap' : 'Semester Ganjil'})
+                  <strong>Periode Penilaian:</strong> {isMid ? `Tengah Semester (STS) ${schoolInfo.semester}` : `${schoolInfo.semester} (${isGenap ? 'Semester Genap' : 'Semester Ganjil'})`}
                 </p>
               </div>
               <div className="space-y-0.5 text-right">
@@ -459,66 +684,66 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
             </div>
 
             {/* ========================================================================= */}
-            {/* FORMAT 1: LEGER NILAI & PRESENSI LENGKAP */}
+            {/* FORMAT 1: LEGER NILAI & PRESENSI LENGKAP (AKHIR / MID SEMESTER)           */}
             {/* ========================================================================= */}
             {printMode === 'matrix' && (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-[9.5px] border-collapse border border-black text-black">
+              <div className="overflow-x-auto print:overflow-visible">
+                <table className={`w-full text-left ${scale.tableText} border-collapse border border-black text-black`}>
                   <thead>
                     <tr className="bg-slate-100 border border-black text-center font-bold">
-                      <th rowSpan={2} className="border border-black p-1 w-6">
+                      <th rowSpan={2} className={`border border-black ${scale.thPad} w-6 text-center`}>
                         No
                       </th>
-                      <th rowSpan={2} className="border border-black p-1 text-left min-w-[140px]">
+                      <th rowSpan={2} className={`border border-black ${scale.thPad} text-left min-w-[120px]`}>
                         Nama Peserta Didik
                       </th>
-                      <th rowSpan={2} className="border border-black p-1 w-7">
+                      <th rowSpan={2} className={`border border-black ${scale.thPad} w-6 text-center`}>
                         L/P
                       </th>
 
                       {/* Mapel Columns */}
-                      <th colSpan={subjects.length} className="border border-black p-1 bg-slate-200">
-                        Mata Pelajaran (Nilai Akhir Rapor)
+                      <th colSpan={subjects.length} className={`border border-black ${scale.thPad} ${isMid ? 'bg-amber-100/70' : 'bg-slate-200'}`}>
+                        {isMid ? 'Mata Pelajaran (Nilai STS Tengah Semester)' : 'Mata Pelajaran (Nilai Akhir Rapor KMPM)'}
                       </th>
 
-                      <th rowSpan={2} className="border border-black p-1 w-11 font-extrabold bg-slate-200">
+                      <th rowSpan={2} className={`border border-black ${scale.thPad} w-10 font-extrabold ${isMid ? 'bg-amber-100/70' : 'bg-slate-200'}`}>
                         Total
                       </th>
-                      <th rowSpan={2} className="border border-black p-1 w-11 font-extrabold bg-slate-200">
+                      <th rowSpan={2} className={`border border-black ${scale.thPad} w-10 font-extrabold ${isMid ? 'bg-amber-100/70' : 'bg-slate-200'}`}>
                         Rata²
                       </th>
-                      <th rowSpan={2} className="border border-black p-1 w-9 font-extrabold bg-amber-100">
+                      <th rowSpan={2} className={`border border-black ${scale.thPad} w-8 font-extrabold bg-amber-100`}>
                         Rank
                       </th>
 
                       {showAttendance && (
-                        <th colSpan={3} className="border border-black p-1">
-                          Ketidakhadiran
+                        <th colSpan={3} className={`border border-black ${scale.thPad}`}>
+                          {isMid ? 'Absensi Mid' : 'Ketidakhadiran'}
                         </th>
                       )}
 
-                      <th rowSpan={2} className="border border-black p-1 min-w-[85px]">
-                        Status {isGenap ? 'Kenaikan' : 'Capaian'}
+                      <th rowSpan={2} className={`border border-black ${scale.thPad} min-w-[75px]`}>
+                        {isMid ? 'Catatan Mid' : `Status ${isGenap ? 'Kenaikan' : 'Capaian'}`}
                       </th>
                     </tr>
 
-                    <tr className="bg-slate-50 border border-black text-center font-bold text-[8.5px]">
+                    <tr className="bg-slate-50 border border-black text-center font-bold text-[8px]">
                       {subjects.map(sub => (
                         <th
                           key={sub.id}
-                          className="border border-black p-1 min-w-[34px]"
+                          className={`border border-black ${scale.mapelColWidth}`}
                           title={`${sub.nama} (KKTP: ${sub.kktp})`}
                         >
-                          <div>{sub.kode}</div>
-                          <div className="text-[7.5px] font-normal text-slate-600">≥{sub.kktp}</div>
+                          <div className="font-bold truncate">{sub.kode}</div>
+                          <div className="text-[7px] font-normal text-slate-600">≥{sub.kktp}</div>
                         </th>
                       ))}
 
                       {showAttendance && (
                         <>
-                          <th className="border border-black p-0.5 w-6">S</th>
-                          <th className="border border-black p-0.5 w-6">I</th>
-                          <th className="border border-black p-0.5 w-6">A</th>
+                          <th className="border border-black p-0.5 w-5 font-bold">S</th>
+                          <th className="border border-black p-0.5 w-5 font-bold">I</th>
+                          <th className="border border-black p-0.5 w-5 font-bold">A</th>
                         </>
                       )}
                     </tr>
@@ -529,6 +754,15 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
                       const s = item.student;
                       const r = item.report;
                       const isTop3 = item.numericRank <= 3;
+                      const rankValue = isMid
+                        ? (r.rankingMid || (item.numericRank < 999 ? item.numericRank : '-'))
+                        : (r.ranking || (item.numericRank < 999 ? item.numericRank : '-'));
+
+                      const noteDisplay = isMid
+                        ? (r.catatanWaliKelasMid
+                            ? (r.catatanWaliKelasMid.length > 55 ? r.catatanWaliKelasMid.slice(0, 52) + '...' : r.catatanWaliKelasMid)
+                            : (item.avgScore >= 75 ? 'Tuntas STS' : 'Perlu Bimbingan STS'))
+                        : (r.statusKenaikan || 'Naik Kelas');
 
                       return (
                         <tr
@@ -537,16 +771,20 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
                             isTop3 ? 'bg-amber-50/40' : ''
                           }`}
                         >
-                          <td className="border border-black p-1 font-bold">
+                          <td className={`border border-black ${scale.tdPad} font-bold text-center`}>
                             {s.nomorAbsen || idx + 1}
                           </td>
-                          <td className="border border-black p-1 text-left">
-                            <div className="font-bold text-[10px] leading-tight">{s.nama}</div>
-                            <div className="text-[8px] text-slate-500 font-mono">
-                              NISN: {s.nisn}
-                            </div>
+                          <td className={`border border-black ${scale.tdPad} text-left whitespace-normal break-words`}>
+                            <div className={scale.nameText}>{s.nama}</div>
+                            {showNisn && s.nisn && (
+                              <div className={scale.nisnText}>
+                                NISN: {s.nisn}
+                              </div>
+                            )}
                           </td>
-                          <td className="border border-black p-1">{s.jenisKelamin}</td>
+                          <td className={`border border-black ${scale.tdPad} text-center`}>
+                            {s.jenisKelamin}
+                          </td>
 
                           {/* Scores */}
                           {subjects.map(sub => {
@@ -556,44 +794,44 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
                             return (
                               <td
                                 key={sub.id}
-                                className={`border border-black p-1 font-semibold ${
-                                  !isTuntas ? 'text-rose-700 font-bold bg-rose-50' : ''
+                                className={`border border-black ${scale.tdPad} font-semibold text-center ${
+                                  !isTuntas && score > 0 ? 'text-rose-700 font-bold bg-rose-50' : ''
                                 }`}
                               >
-                                {score}
+                                {score > 0 ? score : '-'}
                               </td>
                             );
                           })}
 
                           {/* Total & Average */}
-                          <td className="border border-black p-1 font-black bg-slate-50">
+                          <td className={`border border-black ${scale.tdPad} font-black text-center bg-slate-50`}>
                             {item.totalScore}
                           </td>
-                          <td className="border border-black p-1 font-black bg-slate-50">
+                          <td className={`border border-black ${scale.tdPad} font-black text-center bg-slate-50`}>
                             {item.avgScore}
                           </td>
-                          <td className="border border-black p-1 font-black bg-amber-50">
-                            {r.ranking || item.numericRank}
+                          <td className={`border border-black ${scale.tdPad} font-black text-center bg-amber-50`}>
+                            {rankValue}
                           </td>
 
                           {/* Attendance */}
                           {showAttendance && (
                             <>
-                              <td className="border border-black p-1 font-mono">
+                              <td className={`border border-black ${scale.tdPad} text-center font-mono`}>
                                 {item.attStats.sakit}
                               </td>
-                              <td className="border border-black p-1 font-mono">
+                              <td className={`border border-black ${scale.tdPad} text-center font-mono`}>
                                 {item.attStats.izin}
                               </td>
-                              <td className="border border-black p-1 font-mono font-bold text-rose-700">
+                              <td className={`border border-black ${scale.tdPad} text-center font-mono font-bold ${item.attStats.alpa > 0 ? 'text-rose-700' : ''}`}>
                                 {item.attStats.alpa}
                               </td>
                             </>
                           )}
 
-                          {/* Status */}
-                          <td className="border border-black p-1 font-semibold text-[9px]">
-                            {r.statusKenaikan || 'Naik Kelas'}
+                          {/* Status / Catatan */}
+                          <td className={`border border-black ${scale.tdPad} font-medium text-left leading-tight text-[8px]`}>
+                            {noteDisplay}
                           </td>
                         </tr>
                       );
@@ -605,55 +843,55 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
                     <tfoot>
                       {/* Rata-Rata */}
                       <tr className="bg-slate-100 font-bold border-t-2 border-black">
-                        <td colSpan={3} className="border border-black p-1 text-right font-black">
+                        <td colSpan={3} className={`border border-black ${scale.tdPad} text-right font-black`}>
                           RATA-RATA KELAS:
                         </td>
                         {subjects.map(sub => (
-                          <td key={sub.id} className="border border-black p-1 text-center font-mono">
+                          <td key={sub.id} className={`border border-black ${scale.tdPad} text-center font-mono font-bold`}>
                             {classStats.subjectAverages[sub.id] ?? '-'}
                           </td>
                         ))}
-                        <td className="border border-black p-1 text-center font-black">
+                        <td className={`border border-black ${scale.tdPad} text-center font-black`}>
                           {(classStats.overallAvg * subjects.length).toFixed(0)}
                         </td>
-                        <td className="border border-black p-1 text-center font-black">
+                        <td className={`border border-black ${scale.tdPad} text-center font-black`}>
                           {classStats.overallAvg}
                         </td>
-                        <td colSpan={showAttendance ? 5 : 2} className="border border-black p-1 text-[8.5px] text-left">
-                          Rerata dari {students.length} Peserta Didik
+                        <td colSpan={showAttendance ? 5 : 2} className={`border border-black ${scale.tdPad} text-[8px] text-left`}>
+                          Rerata dari {students.length} Peserta Didik ({isMid ? 'Mid STS' : 'Akhir Smt'})
                         </td>
                       </tr>
 
                       {/* Tertinggi */}
-                      <tr className="bg-slate-50 text-[8.5px]">
-                        <td colSpan={3} className="border border-black p-1 text-right font-bold text-emerald-800">
+                      <tr className="bg-slate-50 text-[8px]">
+                        <td colSpan={3} className={`border border-black ${scale.tdPad} text-right font-bold text-emerald-800`}>
                           NILAI TERTINGGI:
                         </td>
                         {subjects.map(sub => (
-                          <td key={sub.id} className="border border-black p-1 text-center font-mono font-bold text-emerald-800">
+                          <td key={sub.id} className={`border border-black ${scale.tdPad} text-center font-mono font-bold text-emerald-800`}>
                             {classStats.subjectMax[sub.id] ?? '-'}
                           </td>
                         ))}
-                        <td className="border border-black p-1 text-center font-bold text-emerald-800">
+                        <td className={`border border-black ${scale.tdPad} text-center font-bold text-emerald-800`}>
                           {classStats.highestTotal}
                         </td>
-                        <td colSpan={showAttendance ? 6 : 3} className="border border-black p-1 text-[8.5px] text-left">
-                          Nilai Terendah: Total {classStats.lowestTotal}
+                        <td colSpan={showAttendance ? 5 : 2} className={`border border-black ${scale.tdPad} text-[8px] text-left`}>
+                          Total Terendah: {classStats.lowestTotal}
                         </td>
                       </tr>
 
                       {/* % Tuntas */}
-                      <tr className="bg-slate-50 text-[8.5px]">
-                        <td colSpan={3} className="border border-black p-1 text-right font-bold text-blue-800">
+                      <tr className="bg-slate-50 text-[8px]">
+                        <td colSpan={3} className={`border border-black ${scale.tdPad} text-right font-bold text-blue-800`}>
                           KETUNTASAN KKTP (%):
                         </td>
                         {subjects.map(sub => (
-                          <td key={sub.id} className="border border-black p-1 text-center font-mono font-bold text-blue-800">
+                          <td key={sub.id} className={`border border-black ${scale.tdPad} text-center font-mono font-bold text-blue-800`}>
                             {classStats.subjectPassPercent[sub.id]}%
                           </td>
                         ))}
-                        <td colSpan={showAttendance ? 8 : 5} className="border border-black p-1 text-[8.5px] text-left">
-                          Target Ketercapaian Tujuan Pembelajaran 100%
+                        <td colSpan={showAttendance ? 7 : 4} className={`border border-black ${scale.tdPad} text-[8px] text-left`}>
+                          Target Ketercapaian Pembelajaran Mendalam (KMPM) 100%
                         </td>
                       </tr>
                     </tfoot>
@@ -663,24 +901,24 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
             )}
 
             {/* ========================================================================= */}
-            {/* FORMAT 2: DAFTAR PERINGKAT & PRESTASI SE-KELAS */}
+            {/* FORMAT 2: DAFTAR PERINGKAT & PRESTASI SE-KELAS                            */}
             {/* ========================================================================= */}
             {printMode === 'leaderboard' && (
-              <div className="overflow-x-auto space-y-4">
-                <table className="w-full text-left text-[10px] border-collapse border border-black text-black">
+              <div className="overflow-x-auto print:overflow-visible space-y-3">
+                <table className="w-full text-left text-[9.5px] border-collapse border border-black text-black">
                   <thead>
                     <tr className="bg-slate-100 border border-black text-center font-bold">
                       <th className="border border-black p-1.5 w-12 bg-amber-100 font-black">
                         Peringkat
                       </th>
                       <th className="border border-black p-1.5 w-10">Absen</th>
-                      <th className="border border-black p-1.5 w-24">NISN</th>
-                      <th className="border border-black p-1.5 text-left min-w-[160px]">
+                      {showNisn && <th className="border border-black p-1.5 w-24">NISN</th>}
+                      <th className="border border-black p-1.5 text-left min-w-[150px]">
                         Nama Peserta Didik
                       </th>
                       <th className="border border-black p-1.5 w-8">L/P</th>
                       <th className="border border-black p-1.5 w-16 font-extrabold bg-slate-200">
-                        Total Nilai
+                        {isMid ? 'Total STS' : 'Total Nilai'}
                       </th>
                       <th className="border border-black p-1.5 w-16 font-extrabold bg-slate-200">
                         Rata-Rata
@@ -699,10 +937,16 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
                     {sortedStudents.map((item, idx) => {
                       const s = item.student;
                       const r = item.report;
-                      const rankDisplay = r.ranking || item.numericRank;
+                      const rankDisplay = isMid
+                        ? (r.rankingMid || item.numericRank)
+                        : (r.ranking || item.numericRank);
                       const isTop1 = item.numericRank === 1;
                       const isTop2 = item.numericRank === 2;
                       const isTop3 = item.numericRank === 3;
+
+                      const noteText = isMid
+                        ? (r.catatanWaliKelasMid || (item.numericRank <= 3 ? 'Prestasi gemilang di paruh semester ini.' : 'Tingkatkan ketekunan belajar di paruh semester kedua.'))
+                        : (r.catatanWaliKelas || (item.numericRank <= 3 ? 'Prestasi istimewa, pertahankan capaian belajar.' : 'Tingkatkan keaktifan dan ketuntasan belajar.'));
 
                       return (
                         <tr
@@ -721,7 +965,7 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
                           <td className="border border-black p-1.5 font-bold">
                             {s.nomorAbsen || idx + 1}
                           </td>
-                          <td className="border border-black p-1.5 font-mono">{s.nisn}</td>
+                          {showNisn && <td className="border border-black p-1.5 font-mono">{s.nisn}</td>}
                           <td className="border border-black p-1.5 text-left font-bold">{s.nama}</td>
                           <td className="border border-black p-1.5">{s.jenisKelamin}</td>
                           <td className="border border-black p-1.5 font-black bg-slate-50">
@@ -739,12 +983,8 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
                           <td className="border border-black p-1.5 text-[9px] font-semibold">
                             {item.completedCount}/{subjects.length} Tuntas
                           </td>
-                          <td className="border border-black p-1.5 text-left text-[9px] leading-tight">
-                            {r.catatanWaliKelas
-                              ? r.catatanWaliKelas.slice(0, 80) + '...'
-                              : item.numericRank <= 3
-                              ? 'Prestasi istimewa, pertahankan capaian belajar.'
-                              : 'Tingkatkan keaktifan dan ketuntasan belajar.'}
+                          <td className="border border-black p-1.5 text-left text-[8.5px] leading-tight">
+                            {noteText.length > 75 ? noteText.slice(0, 72) + '...' : noteText}
                           </td>
                         </tr>
                       );
@@ -755,25 +995,25 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
             )}
 
             {/* ========================================================================= */}
-            {/* FORMAT 3: REKAP KEPUTUSAN KENAIKAN KELAS & KELULUSAN */}
+            {/* FORMAT 3: REKAP KEPUTUSAN KENAIKAN KELAS & KELULUSAN                      */}
             {/* ========================================================================= */}
-            {printMode === 'kenaikan' && (
-              <div className="overflow-x-auto space-y-4">
-                <table className="w-full text-left text-[10px] border-collapse border border-black text-black">
+            {printMode === 'kenaikan' && !isMid && (
+              <div className="overflow-x-auto print:overflow-visible space-y-4">
+                <table className="w-full text-left text-[9.5px] border-collapse border border-black text-black">
                   <thead>
                     <tr className="bg-slate-100 border border-black text-center font-bold">
                       <th className="border border-black p-1.5 w-10">No</th>
-                      <th className="border border-black p-1.5 w-24">NISN</th>
-                      <th className="border border-black p-1.5 text-left min-w-[160px]">
+                      {showNisn && <th className="border border-black p-1.5 w-24">NISN</th>}
+                      <th className="border border-black p-1.5 text-left min-w-[150px]">
                         Nama Peserta Didik
                       </th>
                       <th className="border border-black p-1.5 w-8">L/P</th>
                       <th className="border border-black p-1.5 w-16">Rata² Nilai</th>
-                      <th className="border border-black p-1.5 min-w-[110px] font-extrabold bg-slate-200">
+                      <th className="border border-black p-1.5 min-w-[100px] font-extrabold bg-slate-200">
                         Keputusan Status
                       </th>
-                      <th className="border border-black p-1.5 min-w-[100px]">Target Kelas</th>
-                      <th className="border border-black p-1.5 text-left min-w-[240px]">
+                      <th className="border border-black p-1.5 min-w-[90px]">Target Kelas</th>
+                      <th className="border border-black p-1.5 text-left min-w-[220px]">
                         Narasi Keputusan Resmi Rapor
                       </th>
                     </tr>
@@ -789,17 +1029,17 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
                           <td className="border border-black p-1.5 font-bold">
                             {s.nomorAbsen || idx + 1}
                           </td>
-                          <td className="border border-black p-1.5 font-mono">{s.nisn}</td>
+                          {showNisn && <td className="border border-black p-1.5 font-mono">{s.nisn}</td>}
                           <td className="border border-black p-1.5 text-left font-bold">{s.nama}</td>
                           <td className="border border-black p-1.5">{s.jenisKelamin}</td>
                           <td className="border border-black p-1.5 font-bold">{item.avgScore}</td>
-                          <td className="border border-black p-1.5 font-black uppercase text-[10px]">
+                          <td className="border border-black p-1.5 font-black uppercase text-[9.5px]">
                             {status}
                           </td>
-                          <td className="border border-black p-1.5 font-semibold text-[9.5px]">
+                          <td className="border border-black p-1.5 font-semibold text-[9px]">
                             {r.targetKelas || '-'}
                           </td>
-                          <td className="border border-black p-1.5 text-left text-[9px] leading-tight">
+                          <td className="border border-black p-1.5 text-left text-[8.5px] leading-tight">
                             {r.keteranganKenaikan ||
                               `Berdasarkan pencapaian seluruh tujuan pembelajaran pada Tahun Ajaran ${schoolInfo.academicYear}, ananda dinyatakan: NAIK KELAS.`}
                           </td>
@@ -810,7 +1050,7 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
                 </table>
 
                 {/* Ringkasan Jumlah */}
-                <div className="border border-black p-3 bg-slate-50 text-[10px] grid grid-cols-3 text-center font-bold">
+                <div className="border border-black p-2.5 bg-slate-50 text-[9.5px] grid grid-cols-3 text-center font-bold">
                   <div>Naik Kelas: {classStats.countNaik} Siswa</div>
                   <div>Tinggal Kelas: {classStats.countTinggal} Siswa</div>
                   <div>Lulus: {classStats.countLulus} Siswa</div>
@@ -820,15 +1060,15 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
 
             {/* 3. Tanda Tangan Resmi 2 Pihak */}
             {showSignature && (
-              <div className="mt-8 grid grid-cols-2 text-[11px] text-center text-black page-break-inside-avoid">
+              <div className="mt-6 sm:mt-8 grid grid-cols-2 text-[10.5px] text-center text-black page-break-inside-avoid">
                 <div>
                   <p>Mengetahui,</p>
                   <p className="font-bold">Kepala Sekolah {schoolInfo.schoolName}</p>
-                  <div className="h-16" />
+                  <div className={scale.signGap} />
                   <p className="font-bold uppercase underline">
                     {schoolInfo.headmasterName || 'NAMA KEPALA SEKOLAH'}
                   </p>
-                  <p className="font-mono text-[10px]">
+                  <p className="font-mono text-[9.5px]">
                     NIP. {schoolInfo.headmasterNip || '----------------------'}
                   </p>
                 </div>
@@ -838,11 +1078,11 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
                     {schoolInfo.city || 'Kuantan Singingi'}, {customReportDate}
                   </p>
                   <p className="font-bold">Guru Kelas / Wali Kelas {schoolInfo.className}</p>
-                  <div className="h-16" />
+                  <div className={scale.signGap} />
                   <p className="font-bold uppercase underline">
                     {schoolInfo.homeroomTeacherName || 'NAMA GURU WALI KELAS'}
                   </p>
-                  <p className="font-mono text-[10px]">
+                  <p className="font-mono text-[9.5px]">
                     NIP. {schoolInfo.homeroomTeacherNip || '----------------------'}
                   </p>
                 </div>
@@ -852,10 +1092,10 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
         </div>
 
         {/* Modal Footer */}
-        <div className="flex items-center justify-between border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-5 py-3 no-print print:hidden shrink-0">
+        <div className="flex items-center justify-between border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 sm:px-5 py-3 no-print print:hidden shrink-0">
           <div className="flex items-center gap-2 text-xs text-slate-500">
             <Info className="h-4 w-4 text-blue-500" />
-            <span>Format cetak dioptimalkan untuk kertas A4 / F4 (Folio) Landscape atau Portrait.</span>
+            <span>Format cetak dioptimalkan untuk kertas A4 / F4 (Folio) {pageOrientation === 'landscape' ? 'Lanskap' : 'Tegak'}.</span>
           </div>
 
           <div className="flex items-center gap-2">
@@ -869,10 +1109,14 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
             <button
               type="button"
               onClick={handlePrintDocument}
-              className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-xs font-bold shadow-md shadow-blue-600/20 transition-all"
+              className={`flex items-center gap-1.5 px-5 py-2 rounded-xl text-white text-xs font-bold shadow-md transition-all cursor-pointer ${
+                isMid
+                  ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/20 active:scale-95'
+                  : 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/20 active:scale-95'
+              }`}
             >
               <Printer className="h-4 w-4" />
-              <span>Cetak Leger Resmi</span>
+              <span>Cetak Leger Resmi {isMid ? 'Mid Semester' : 'Akhir Semester'}</span>
             </button>
           </div>
         </div>

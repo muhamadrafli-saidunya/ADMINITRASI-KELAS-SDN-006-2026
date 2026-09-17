@@ -224,6 +224,7 @@ interface AppContextType {
     silent?: boolean
   ) => void;
   bulkAutoCalculateRankings: () => void;
+  bulkAutoCalculateMidRankings: () => void;
   bulkSetKenaikanKelas: (status: KenaikanStatus, targetKelas?: string) => void;
   calculateStudentRankings: () => Array<{ siswaId: string; rank: number; totalScore: number; avgScore: number }>;
   calculateMidSemesterRankings: () => Array<{ siswaId: string; rank: number; totalScore: number; avgScore: number }>;
@@ -1961,6 +1962,22 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     addToast('success', 'Ranking Dihitung Otomatis', `Peringkat kelas 1 sampai ${rankedList.length} berhasil dihitung berdasarkan total akumulasi nilai seluruh mapel.`);
   };
 
+  const bulkAutoCalculateMidRankings = () => {
+    const rankedList = calculateMidSemesterRankings();
+    setStudentReports(prev => {
+      const nextReports = { ...prev };
+      rankedList.forEach(item => {
+        const curr = nextReports[item.siswaId] || getStudentReport(item.siswaId);
+        nextReports[item.siswaId] = {
+          ...curr,
+          rankingMid: String(item.rank)
+        };
+      });
+      return nextReports;
+    });
+    addToast('success', 'Ranking Mid Dihitung Otomatis', `Peringkat Mid Semester 1 sampai ${rankedList.length} berhasil dihitung berdasarkan akumulasi nilai STS seluruh mapel.`);
+  };
+
   const bulkSetKenaikanKelas = (status: KenaikanStatus, targetKelas?: string) => {
     const currentClass = schoolInfo.className || 'Kelas 4A';
     const nextClass = targetKelas || (currentClass.includes('4') ? 'V (Lima)' : currentClass.includes('5') ? 'VI (Enam)' : 'Kelas Selanjutnya');
@@ -2814,6 +2831,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         getEffectiveStudentAttendance,
         updateStudentReportAttendance,
         bulkAutoCalculateRankings,
+        bulkAutoCalculateMidRankings,
         bulkSetKenaikanKelas,
         calculateStudentRankings,
         calculateMidSemesterRankings,
