@@ -268,7 +268,7 @@ export const PenilaianView: React.FC = () => {
   const isTeacherOrAdmin = currentUser.role !== 'siswa';
 
   return (
-    <div className={`space-y-6 ${isPrintLegerOpen ? 'print:hidden' : ''}`}>
+    <div className="space-y-6">
       {/* Sub-Tab Navigation Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-1.5 bg-slate-100 dark:bg-slate-800/80 rounded-2xl">
         <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar w-full sm:w-auto">

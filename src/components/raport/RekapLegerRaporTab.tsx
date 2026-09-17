@@ -425,7 +425,7 @@ export const RekapLegerRaporTab: React.FC<RekapLegerRaporTabProps> = ({
   };
 
   return (
-    <div className={`space-y-6 ${isPrintLegerOpen ? 'print:hidden' : ''}`}>
+    <div className="space-y-6">
       {/* Selector Mode Periode Leger: Akhir Semester vs Mid Semester */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-3.5 bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 text-white rounded-2xl shadow-sm print:hidden">
         <div className="flex items-center gap-3">

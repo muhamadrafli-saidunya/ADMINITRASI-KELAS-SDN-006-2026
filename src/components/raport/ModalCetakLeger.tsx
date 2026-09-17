@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useApp } from '../../context/AppContext';
 import { isSemesterGenap } from '../../types';
 import { HeaderKopSekolah } from '../common/HeaderKopSekolah';
@@ -278,7 +279,9 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
   if (!isOpen) return null;
 
   const handlePrintDocument = () => {
-    window.print();
+    setTimeout(() => {
+      window.print();
+    }, 60);
   };
 
   const getDocTitle = () => {
@@ -344,8 +347,11 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
   const scale = getScaleStyles();
   const trailingExtraCols = (showRankColumn ? 1 : 0) + (showAttendance ? 3 : 0) + (showStatusColumn ? 1 : 0);
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-2 sm:p-4 backdrop-blur-xs print:p-0 print:m-0 print:static print:block print:overflow-visible print:bg-transparent print:z-auto">
+  const modalContent = (
+    <div
+      id="modal-cetak-leger-root"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-2 sm:p-4 backdrop-blur-xs print:p-0 print:m-0 print:static print:block print:overflow-visible print:bg-transparent print:z-auto"
+    >
       {/* Dynamic Print CSS for Page Sizing, Paper Fitting & Repeating Headers */}
       <style>{`
         @media print {
@@ -362,16 +368,71 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
             width: 100% !important;
             margin: 0 !important;
             padding: 0 !important;
-            background: white !important;
-            color: black !important;
+            background: #ffffff !important;
+            background-color: #ffffff !important;
+            color: #000000 !important;
           }
-          .printable-document-sheet {
+          /* Sembunyikan container app utama saat modal cetak aktif */
+          body.print-modal-active > #root {
+            display: none !important;
+            visibility: hidden !important;
+            height: 0 !important;
+            overflow: hidden !important;
+          }
+          /* Pastikan modal cetak tampil penuh dan tidak terpotong */
+          body.print-modal-active #modal-cetak-leger-root {
+            display: block !important;
+            position: static !important;
             width: 100% !important;
+            min-width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: transparent !important;
+            overflow: visible !important;
+          }
+          body.print-modal-active #modal-cetak-leger-root .print-modal-card {
+            display: block !important;
+            position: static !important;
+            width: 100% !important;
+            max-width: none !important;
+            max-height: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            border: none !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
+            background: transparent !important;
+            overflow: visible !important;
+          }
+          body.print-modal-active #modal-cetak-leger-root .print-modal-scroll-area {
+            display: block !important;
+            position: static !important;
+            width: 100% !important;
+            height: auto !important;
+            max-height: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: transparent !important;
+            overflow: visible !important;
+          }
+          body.print-modal-active #printable-official-document,
+          body.print-modal-active .printable-document-sheet {
+            display: block !important;
+            visibility: visible !important;
+            width: 100% !important;
+            min-width: 100% !important;
             max-width: none !important;
             margin: 0 !important;
             padding: 0 !important;
             border: none !important;
+            border-radius: 0 !important;
             box-shadow: none !important;
+            background: #ffffff !important;
+            color: #000000 !important;
+            overflow: visible !important;
+          }
+          body.print-modal-active #printable-official-document * {
+            visibility: visible !important;
           }
           table {
             width: 100% !important;
@@ -390,7 +451,8 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
             break-inside: avoid !important;
           }
           th, td {
-            border: 1px solid #000 !important;
+            border: 1px solid #000000 !important;
+            color: #000000 !important;
           }
           .page-break-inside-avoid {
             page-break-inside: avoid !important;
@@ -399,7 +461,7 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
         }
       `}</style>
 
-      <div className="relative w-full max-w-6xl max-h-[96vh] flex flex-col rounded-2xl bg-slate-100 dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden animate-in fade-in zoom-in-95 duration-150 print:max-h-none print:w-full print:max-w-none print:border-none print:shadow-none print:rounded-none print:m-0 print:p-0 print:static print:bg-transparent print:overflow-visible print:animate-none">
+      <div className="print-modal-card relative w-full max-w-6xl max-h-[96vh] flex flex-col rounded-2xl bg-slate-100 dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden animate-in fade-in zoom-in-95 duration-150 print:max-h-none print:w-full print:max-w-none print:border-none print:shadow-none print:rounded-none print:m-0 print:p-0 print:static print:bg-transparent print:overflow-visible print:animate-none">
         {/* Top Header Toolbar */}
         <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 sm:px-5 py-3 no-print print:hidden shrink-0">
           <div className="flex items-center gap-3">
@@ -684,7 +746,7 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
         </div>
 
         {/* Scrollable Printable Document View */}
-        <div className="flex-1 overflow-y-auto p-3 sm:p-6 custom-scrollbar bg-slate-200/60 dark:bg-slate-950 print:p-0 print:m-0 print:overflow-visible print:bg-transparent print:block">
+        <div className="print-modal-scroll-area flex-1 overflow-y-auto p-3 sm:p-6 custom-scrollbar bg-slate-200/60 dark:bg-slate-950 print:p-0 print:m-0 print:overflow-visible print:bg-transparent print:block">
           {/* Active Mode Notice */}
           <div className="max-w-[1150px] mx-auto mb-2 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 print:hidden">
             <div className="flex items-center gap-1.5">
@@ -1187,4 +1249,6 @@ export const ModalCetakLeger: React.FC<ModalCetakLegerProps> = ({
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : modalContent;
 };
