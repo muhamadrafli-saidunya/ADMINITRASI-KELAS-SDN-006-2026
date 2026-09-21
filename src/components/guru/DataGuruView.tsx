@@ -26,11 +26,12 @@ import {
   Eye,
   CheckCircle2,
   Building2,
-  Users
+  Users,
+  FileSpreadsheet
 } from 'lucide-react';
 
 export const DataGuruView: React.FC = () => {
-  const { teachers, deleteTeacher, currentUser, schoolInfo } = useApp();
+  const { teachers, deleteTeacher, currentUser, schoolInfo, setCurrentTab } = useApp();
 
   // State Management
   const [searchQuery, setSearchQuery] = useState('');
@@ -166,6 +167,16 @@ export const DataGuruView: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            type="button"
+            onClick={() => setCurrentTab('import_excel')}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-950/40 hover:bg-purple-100 dark:hover:bg-purple-900/50 text-purple-700 dark:text-purple-300 text-xs font-bold shadow-sm transition-all active:scale-95"
+            title="Import data guru dari template Excel atau unduh template resmi"
+          >
+            <FileSpreadsheet className="h-4 w-4 text-purple-600 dark:text-purple-400" />
+            <span>Import / Ekspor Excel</span>
+          </button>
+
           <button
             type="button"
             onClick={() => handleOpenPrint()}

@@ -71,7 +71,15 @@ import {
   CurriculumPhaseKey,
   generateGradesForCurriculumPhase
 } from '../data/kurikulumMerdekaPresets';
-import { syncStudent, deleteStudentDoc } from '../services/firestoreSync';
+import {
+  syncStudent,
+  deleteStudentDoc,
+  syncTeacher,
+  syncTransaction,
+  syncInventoryItem,
+  syncAttendance,
+  syncScheduleItem
+} from '../services/firestoreSync';
 
 export interface ToastMessage {
   id: string;
@@ -131,6 +139,7 @@ interface AppContextType {
   updateTeacher: (id: string, updated: Partial<Teacher>) => void;
   deleteTeacher: (id: string) => void;
   getTeacherById: (id: string) => Teacher | undefined;
+  bulkImportTeachers: (importedTeachers: Teacher[], mode?: 'append' | 'replace') => void;
 
   // Subjects
   subjects: Subject[];
@@ -169,6 +178,7 @@ interface AppContextType {
     total: number;
     percentage: number;
   };
+  bulkImportAttendance: (importedRecords: AttendanceRecord[], mode?: 'append' | 'replace') => void;
 
   // Grades (Penilaian)
   grades: GradeRecord[];
@@ -251,6 +261,7 @@ interface AppContextType {
   deleteScheduleItem: (id: string) => void;
   resetScheduleToDefault: () => void;
   duplicateDaySchedule: (fromDay: 'Senin' | 'Selasa' | 'Rabu' | 'Kamis' | 'Jumat' | 'Sabtu', toDay: 'Senin' | 'Selasa' | 'Rabu' | 'Kamis' | 'Jumat' | 'Sabtu') => void;
+  bulkImportSchedule: (importedItems: ScheduleItem[], mode?: 'append' | 'replace') => void;
 
   // Cash Treasury & Dues
   transactions: CashTransaction[];
@@ -258,6 +269,7 @@ interface AppContextType {
   addCashTransaction: (trx: Omit<CashTransaction, 'id' | 'saldoSetelah'>) => void;
   updateCashTransaction: (id: string, updated: Partial<CashTransaction>) => void;
   deleteCashTransaction: (id: string) => void;
+  bulkImportCash: (importedCash: CashTransaction[], mode?: 'append' | 'replace') => void;
   weeklyDues: StudentWeeklyDues[];
   toggleStudentDues: (siswaId: string, week: 1 | 2 | 3 | 4) => void;
   resetStudentDues: (siswaId: string) => void;
@@ -278,6 +290,7 @@ interface AppContextType {
   addInventoryItem: (item: Omit<InventoryItem, 'id'>) => void;
   updateInventoryItem: (id: string, updated: Partial<InventoryItem>) => void;
   deleteInventoryItem: (id: string) => void;
+  bulkImportInventory: (importedItems: InventoryItem[], mode?: 'append' | 'replace') => void;
 
   // Counseling & Achievements
   counseling: CounselingRecord[];
@@ -460,9 +473,26 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     getSaved('studentReports', generateInitialStudentReports())
   );
 
-  const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>(() => 
-    getSaved('attendance', generateInitialAttendance())
-  );
+  const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>(() => {
+    const saved = getSaved('attendance', null);
+    if (!saved || !Array.isArray(saved) || saved.length === 0) {
+      return generateInitialAttendance();
+    }
+    // If saved attendance only has 1 month, merge initial attendance so historical semester data is visible
+    const distinctMonths = new Set(saved.map((r: any) => r.tanggal?.substring(0, 7)).filter(Boolean));
+    if (distinctMonths.size <= 1) {
+      const initial = generateInitialAttendance();
+      const existingIds = new Set(saved.map((r: any) => r.id));
+      const combined = [...saved];
+      initial.forEach(rec => {
+        if (!existingIds.has(rec.id)) {
+          combined.push(rec);
+        }
+      });
+      return combined;
+    }
+    return saved;
+  });
 
   const [journals, setJournals] = useState<TeachingJournal[]>(() => 
     getSaved('journals', INITIAL_JOURNALS)
@@ -1390,6 +1420,73 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const getTeacherById = (id: string) => teachers.find(t => t.id === id);
 
+  const bulkImportTeachers = (importedTeachers: Teacher[], mode: 'append' | 'replace' = 'append') => {
+    if (!importedTeachers || importedTeachers.length === 0) return;
+
+    let finalTeachers: Teacher[] = [];
+
+    if (mode === 'replace') {
+      finalTeachers = [...importedTeachers];
+    } else {
+      // Merge by NIP, NUPTK, or normalized Nama
+      const teacherMap = new Map<string, Teacher>();
+      (teachers || []).forEach(t => {
+        const key = (t.nip && t.nip !== '-' && t.nip.trim()) || (t.nuptk && t.nuptk.trim()) || t.id || t.nama.toLowerCase().trim();
+        teacherMap.set(key, t);
+      });
+
+      importedTeachers.forEach(t => {
+        const key = (t.nip && t.nip !== '-' && t.nip.trim()) || (t.nuptk && t.nuptk.trim()) || t.id || t.nama.toLowerCase().trim();
+        if (teacherMap.has(key)) {
+          teacherMap.set(key, { ...teacherMap.get(key)!, ...t });
+        } else {
+          teacherMap.set(key, t);
+        }
+      });
+
+      finalTeachers = Array.from(teacherMap.values());
+    }
+
+    setTeachers(finalTeachers);
+    localStorage.setItem(STORAGE_PREFIX + 'teachers', JSON.stringify(finalTeachers));
+
+    // Also auto-sync headmaster or homeroom teacher to schoolInfo if detected
+    const kepsek = finalTeachers.find(t => 
+      t.jabatan?.toLowerCase().includes('kepala sekolah') || 
+      t.jenisGuru === 'Kepala Sekolah'
+    );
+    if (kepsek && (!schoolInfo.headmasterName || schoolInfo.headmasterName.includes('Mulyono'))) {
+      setSchoolInfo(prev => ({
+        ...prev,
+        headmasterName: kepsek.nama,
+        headmasterNip: kepsek.nip !== '-' ? kepsek.nip : prev.headmasterNip
+      }));
+    }
+
+    const waliKelas = finalTeachers.find(t => 
+      t.jabatan?.toLowerCase().includes('wali kelas') || 
+      t.kelasDiampu === schoolInfo.className
+    );
+    if (waliKelas && (!schoolInfo.homeroomTeacherName || schoolInfo.homeroomTeacherName.includes('Nur Hidayati'))) {
+      setSchoolInfo(prev => ({
+        ...prev,
+        homeroomTeacherName: waliKelas.nama,
+        homeroomTeacherNip: waliKelas.nip !== '-' ? waliKelas.nip : prev.homeroomTeacherNip
+      }));
+    }
+
+    // Persist to Firestore in background
+    finalTeachers.forEach(t => {
+      syncTeacher(t).catch(err => console.warn('[Firestore] Sync teacher warning:', err));
+    });
+
+    addToast(
+      'success',
+      'Import Data Guru & Tendik Berhasil',
+      `${finalTeachers.length} data pendidik & tenaga kependidikan berhasil disimpan & disinkronkan.`
+    );
+  };
+
   // Subject CRUD
   const addSubject = (sub: Omit<Subject, 'id'>) => {
     const newSub: Subject = {
@@ -1576,6 +1673,37 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const deleteAttendanceRecord = (id: string) => {
     setAttendanceRecords(prev => prev.filter(r => r.id !== id));
+  };
+
+  const bulkImportAttendance = (importedRecords: AttendanceRecord[], mode: 'append' | 'replace' = 'append') => {
+    if (!importedRecords || importedRecords.length === 0) return;
+
+    let finalRecords: AttendanceRecord[] = [];
+    if (mode === 'replace') {
+      finalRecords = [...importedRecords];
+    } else {
+      const attMap = new Map<string, AttendanceRecord>();
+      (attendanceRecords || []).forEach(r => {
+        attMap.set(`${r.siswaId}_${r.tanggal}`, r);
+      });
+      importedRecords.forEach(r => {
+        attMap.set(`${r.siswaId}_${r.tanggal}`, r);
+      });
+      finalRecords = Array.from(attMap.values());
+    }
+
+    setAttendanceRecords(finalRecords);
+    localStorage.setItem(STORAGE_PREFIX + 'attendance', JSON.stringify(finalRecords));
+
+    finalRecords.forEach(r => {
+      syncAttendance(r).catch(err => console.warn('[Firestore] Sync attendance warning:', err));
+    });
+
+    addToast(
+      'success',
+      'Import Presensi Berhasil',
+      `Berhasil menyimpan ${importedRecords.length} catatan kehadiran siswa.`
+    );
   };
 
   const getAttendanceByDate = (tanggal: string) => {
@@ -2144,6 +2272,44 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     addToast('success', 'Jadwal Disalin', `Susunan jadwal hari ${fromDay} (${sourceItems.length} JP) berhasil disalin ke hari ${toDay}.`);
   };
 
+  const bulkImportSchedule = (importedItems: ScheduleItem[], mode: 'append' | 'replace' = 'append') => {
+    if (!importedItems || importedItems.length === 0) return;
+
+    let finalSchedule: ScheduleItem[] = [];
+    if (mode === 'replace') {
+      finalSchedule = [...importedItems];
+    } else {
+      const schMap = new Map<string, ScheduleItem>();
+      (schedule || []).forEach(item => {
+        schMap.set(`${item.hari}_${item.jamKe}`, item);
+      });
+      importedItems.forEach(item => {
+        schMap.set(`${item.hari}_${item.jamKe}`, item);
+      });
+      finalSchedule = Array.from(schMap.values());
+    }
+
+    const days = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+    finalSchedule.sort((a, b) => {
+      const dayDiff = days.indexOf(a.hari) - days.indexOf(b.hari);
+      if (dayDiff !== 0) return dayDiff;
+      return a.jamKe - b.jamKe;
+    });
+
+    setSchedule(finalSchedule);
+    localStorage.setItem(STORAGE_PREFIX + 'schedule', JSON.stringify(finalSchedule));
+
+    finalSchedule.forEach(item => {
+      syncScheduleItem(item).catch(err => console.warn('[Firestore] Sync schedule warning:', err));
+    });
+
+    addToast(
+      'success',
+      'Import Jadwal Pelajaran Berhasil',
+      `Berhasil menyimpan ${finalSchedule.length} slot jadwal pelajaran.`
+    );
+  };
+
   // Cash Treasury
   const getCurrentCashBalance = () => {
     let balance = 0;
@@ -2194,6 +2360,43 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return withBalances.reverse();
     });
     addToast('info', 'Transaksi Dihapus', 'Data transaksi kas telah dihapus.');
+  };
+
+  const bulkImportCash = (importedCash: CashTransaction[], mode: 'append' | 'replace' = 'append') => {
+    if (!importedCash || importedCash.length === 0) return;
+
+    let finalTransactions: CashTransaction[] = [];
+    if (mode === 'replace') {
+      finalTransactions = [...importedCash];
+    } else {
+      finalTransactions = [...importedCash, ...(transactions || [])];
+    }
+
+    // Recalculate balances chronologically (oldest to newest)
+    const sorted = [...finalTransactions].sort((a, b) => new Date(a.tanggal).getTime() - new Date(b.tanggal).getTime());
+    let runningBalance = 0;
+    const withBalance = sorted.map(tx => {
+      if (tx.jenis === 'Pemasukan') {
+        runningBalance += tx.jumlah;
+      } else {
+        runningBalance -= tx.jumlah;
+      }
+      return { ...tx, saldoSetelah: runningBalance };
+    });
+
+    const finalList = withBalance.reverse();
+    setTransactions(finalList);
+    localStorage.setItem(STORAGE_PREFIX + 'transactions', JSON.stringify(finalList));
+
+    finalList.forEach(tx => {
+      syncTransaction(tx).catch(err => console.warn('[Firestore] Sync tx warning:', err));
+    });
+
+    addToast(
+      'success',
+      'Import Kas Berhasil',
+      `Berhasil mengimpor ${importedCash.length} transaksi kas kelas.`
+    );
   };
 
   const toggleStudentDues = (siswaId: string, week: 1 | 2 | 3 | 4) => {
@@ -2294,6 +2497,43 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const deleteInventoryItem = (id: string) => {
     setInventory(prev => prev.filter(item => item.id !== id));
     addToast('info', 'Barang Dihapus', 'Barang inventaris telah dihapus.');
+  };
+
+  const bulkImportInventory = (importedItems: InventoryItem[], mode: 'append' | 'replace' = 'append') => {
+    if (!importedItems || importedItems.length === 0) return;
+
+    let finalInv: InventoryItem[] = [];
+    if (mode === 'replace') {
+      finalInv = [...importedItems];
+    } else {
+      const invMap = new Map<string, InventoryItem>();
+      (inventory || []).forEach(item => {
+        const key = item.kodeBarang || item.id || item.namaBarang.toLowerCase().trim();
+        invMap.set(key, item);
+      });
+      importedItems.forEach(item => {
+        const key = item.kodeBarang || item.id || item.namaBarang.toLowerCase().trim();
+        if (invMap.has(key)) {
+          invMap.set(key, { ...invMap.get(key)!, ...item });
+        } else {
+          invMap.set(key, item);
+        }
+      });
+      finalInv = Array.from(invMap.values());
+    }
+
+    setInventory(finalInv);
+    localStorage.setItem(STORAGE_PREFIX + 'inventory', JSON.stringify(finalInv));
+
+    finalInv.forEach(item => {
+      syncInventoryItem(item).catch(err => console.warn('[Firestore] Sync inventory warning:', err));
+    });
+
+    addToast(
+      'success',
+      'Import Inventaris Berhasil',
+      `Berhasil memperbarui ${finalInv.length} data barang inventaris & sarpras.`
+    );
   };
 
   // Counseling CRUD
@@ -2800,6 +3040,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         updateTeacher,
         deleteTeacher,
         getTeacherById,
+        bulkImportTeachers,
         subjects,
         addSubject,
         updateSubject,
@@ -2818,6 +3059,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         deleteAttendanceRecord,
         getAttendanceByDate,
         getStudentAttendanceStats,
+        bulkImportAttendance,
         grades,
         saveGrade,
         bulkSaveGrades,
@@ -2852,11 +3094,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         deleteScheduleItem,
         resetScheduleToDefault,
         duplicateDaySchedule,
+        bulkImportSchedule,
         transactions,
         cashTransactions: transactions,
         addCashTransaction,
         updateCashTransaction,
         deleteCashTransaction,
+        bulkImportCash,
         weeklyDues,
         toggleStudentDues,
         resetStudentDues,
@@ -2866,6 +3110,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         addInventoryItem,
         updateInventoryItem,
         deleteInventoryItem,
+        bulkImportInventory,
         counseling,
         addCounselingRecord,
         updateCounselingRecord,

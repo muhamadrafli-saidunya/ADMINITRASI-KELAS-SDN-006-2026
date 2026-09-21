@@ -5,6 +5,7 @@ import { BadgeStatus } from '../common/BadgeStatus';
 import { ModalEditKelasFaseGuru } from './ModalEditKelasFaseGuru';
 import { ModalMenuSimpan } from './ModalMenuSimpan';
 import { KMPMAssessmentProgressSummary } from './KMPMAssessmentProgressSummary';
+import { MonthlyAttendanceChart } from './MonthlyAttendanceChart';
 import {
   Users,
   CalendarCheck2,
@@ -439,9 +440,12 @@ export const DashboardView: React.FC = () => {
 
       {/* 5. Main Analytics & Administrative Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column (2 cols): Grades & 15 Books Checklist */}
+        {/* Left Column (2 cols): Attendance Chart, Grades & 15 Books Checklist */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Chart: Capaian Nilai per Mata Pelajaran */}
+          {/* Chart 1: Grafik Batang Ringkasan Presensi Siswa Bulanan */}
+          <MonthlyAttendanceChart />
+
+          {/* Chart 2: Capaian Nilai per Mata Pelajaran */}
           <div className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-6 dark:border-slate-800 dark:bg-slate-900 shadow-xs">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-5">
               <div>

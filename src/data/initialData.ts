@@ -1138,16 +1138,29 @@ export const generateInitialGrades = (): GradeRecord[] => {
   return grades;
 };
 
-// Generate realistic attendance for current month (August 2026 / recent days)
+// Generate realistic attendance for Semester 1 (Juli, Agustus, September 2026)
 export const generateInitialAttendance = (): AttendanceRecord[] => {
   const records: AttendanceRecord[] = [];
   const dates = [
+    // Juli 2026 (Minggu Masuk KBM Awal Semester)
+    '2026-07-20',
+    '2026-07-21',
+    '2026-07-22',
+    '2026-07-23',
+    '2026-07-24',
+    // Agustus 2026
     '2026-08-10',
     '2026-08-11',
     '2026-08-12',
     '2026-08-13',
     '2026-08-14',
-    '2026-08-17' // Today
+    '2026-08-17',
+    // September 2026 (Bulan Berjalan)
+    '2026-09-07',
+    '2026-09-08',
+    '2026-09-09',
+    '2026-09-10',
+    '2026-09-11'
   ];
 
   dates.forEach((date) => {
@@ -1155,7 +1168,13 @@ export const generateInitialAttendance = (): AttendanceRecord[] => {
       let status: 'Hadir' | 'Sakit' | 'Izin' | 'Alpa' = 'Hadir';
       let keterangan = '';
 
-      if (date === '2026-08-12' && student.id === 'sis-05') {
+      if (date === '2026-07-22' && student.id === 'sis-08') {
+        status = 'Sakit';
+        keterangan = 'Demam paska imunisasi';
+      } else if (date === '2026-07-24' && student.id === 'sis-15') {
+        status = 'Izin';
+        keterangan = 'Menemani orang tua keperluan dinas';
+      } else if (date === '2026-08-12' && student.id === 'sis-05') {
         status = 'Sakit';
         keterangan = 'Demam dan flu (Surat Dokter)';
       } else if (date === '2026-08-14' && student.id === 'sis-03') {
@@ -1164,6 +1183,15 @@ export const generateInitialAttendance = (): AttendanceRecord[] => {
       } else if (date === '2026-08-17' && student.id === 'sis-11') {
         status = 'Izin';
         keterangan = 'Izin latihan vokal persiapan lomba paduan suara';
+      } else if (date === '2026-09-08' && student.id === 'sis-02') {
+        status = 'Sakit';
+        keterangan = 'Radang tenggorokan';
+      } else if (date === '2026-09-09' && student.id === 'sis-19') {
+        status = 'Alpa';
+        keterangan = 'Tanpa keterangan (orang tua dihubungi)';
+      } else if (date === '2026-09-11' && student.id === 'sis-24') {
+        status = 'Izin';
+        keterangan = 'Mewakili sekolah lomba sains tingkat kecamatan';
       }
 
       records.push({

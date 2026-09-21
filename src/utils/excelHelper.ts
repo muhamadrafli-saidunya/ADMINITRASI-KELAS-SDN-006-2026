@@ -1146,65 +1146,257 @@ export function parseStudentsFromSheet(ws: XLSX.WorkSheet, defaultClass: string 
   };
 }
 
-// Parse Teachers from Sheet
+// Helper to find worksheet containing teacher data
+export function findTeacherWorksheet(wb: XLSX.WorkBook): { sheetName: string; ws: XLSX.WorkSheet } | null {
+  if (!wb || !wb.SheetNames || wb.SheetNames.length === 0) return null;
+
+  // 1. Direct name match
+  const candidateNames = wb.SheetNames.filter(name =>
+    /guru|teacher|tendik|ptk|pendidik/i.test(name)
+  );
+  if (candidateNames.length > 0) {
+    return { sheetName: candidateNames[0], ws: wb.Sheets[candidateNames[0]] };
+  }
+
+  // 2. Scan sheet contents for teacher headers
+  for (const sheetName of wb.SheetNames) {
+    const ws = wb.Sheets[sheetName];
+    if (!ws) continue;
+    const aoa: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    for (let r = 0; r < Math.min(10, aoa.length); r++) {
+      const row = aoa[r];
+      if (!Array.isArray(row)) continue;
+      const cells = row.map(c => String(c || '').toLowerCase().trim());
+      const hasGuruHeader = cells.some(c => c.includes('nama') || c.includes('guru') || c.includes('pendidik'));
+      const hasNipOrJabatan = cells.some(c => c.includes('nip') || c.includes('nuptk') || c.includes('jabatan') || c.includes('kepegawaian'));
+      if (hasGuruHeader && hasNipOrJabatan) {
+        return { sheetName, ws };
+      }
+    }
+  }
+
+  // Fallback to first sheet
+  const first = wb.SheetNames[0];
+  return first ? { sheetName: first, ws: wb.Sheets[first] } : null;
+}
+
+// Parse Teachers from Sheet with dynamic row recognition and fuzzy matching
 export function parseTeachersFromSheet(ws: XLSX.WorkSheet): ParsedExcelResult<Partial<Teacher>> {
-  const rawRows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+  const aoa: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
   const data: Partial<Teacher>[] = [];
   const errors: string[] = [];
 
-  rawRows.forEach((row, idx) => {
-    const rowNum = idx + 2;
-    const nama = row['Nama Lengkap & Gelar'] || row['Nama Lengkap'] || row['Nama'] || '';
-    const nip = String(row['NIP'] || '-').trim();
-    const nuptk = String(row['NUPTK'] || '').trim();
-    const jkRaw = String(row['Jenis Kelamin (L/P)'] || row['JK'] || 'L').toUpperCase().trim();
-    const jenisKelamin: 'L' | 'P' = jkRaw.startsWith('P') ? 'P' : 'L';
-    const jabatan = row['Jabatan'] || 'Guru Mapel';
-    const jenisGuru = row['Jenis Pendidik'] || row['Jenis Guru'] || 'Guru Mapel';
-    const statusKepegawaian = row['Status Kepegawaian'] || 'PNS';
-    const golonganPangkat = row['Golongan / Pangkat'] || row['Golongan'] || '-';
-    const pendidikanTerakhir = row['Pendidikan Terakhir'] || 'S1 PGSD';
-    const jurusan = row['Jurusan / Prodi'] || row['Jurusan'] || '';
-    const noHp = String(row['No HP / WhatsApp'] || row['No HP'] || '');
-    const email = row['Email'] || '';
-    const alamat = row['Alamat Lengkap'] || row['Alamat'] || '';
-    const statusAktif = row['Status (Aktif/Cuti/Pensiun)'] || row['Status'] || 'Aktif';
-    const mapelString = row['Mata Pelajaran Diampu'] || row['Mata Pelajaran'] || '';
+  if (!aoa || aoa.length === 0) {
+    return { data, errors: ['Lembar sheet data guru kosong.'], totalRows: 0, validRows: 0 };
+  }
 
-    if (!nama || String(nama).trim().length === 0) {
-      errors.push(`Baris ${rowNum}: Nama guru kosong, dilewati.`);
+  // Scan first 10 rows to detect the actual header row
+  let headerRowIndex = -1;
+  for (let r = 0; r < Math.min(10, aoa.length); r++) {
+    const row = aoa[r];
+    if (!Array.isArray(row)) continue;
+    const cells = row.map(c => String(c || '').toLowerCase().trim());
+    const hasNama = cells.some(c => c.includes('nama') || c.includes('guru') || c.includes('pendidik'));
+    const hasDetails = cells.some(c =>
+      c.includes('nip') ||
+      c.includes('nuptk') ||
+      c.includes('jabatan') ||
+      c.includes('kepegawaian') ||
+      c.includes('pangkat') ||
+      c.includes('golongan') ||
+      c.includes('pendidikan') ||
+      c.includes('mapel')
+    );
+    if (hasNama && hasDetails) {
+      headerRowIndex = r;
+      break;
+    }
+    if (hasNama) {
+      headerRowIndex = r;
+      break;
+    }
+  }
+
+  if (headerRowIndex === -1) {
+    headerRowIndex = 0;
+  }
+
+  const rawHeaders: string[] = (aoa[headerRowIndex] || []).map(h => String(h || '').trim());
+  const headerMap = new Map<string, number>();
+
+  rawHeaders.forEach((h, colIdx) => {
+    if (h) {
+      headerMap.set(h.toLowerCase(), colIdx);
+    }
+  });
+
+  // Helper to find column index matching a regex
+  const findCol = (pattern: RegExp, excludePattern?: RegExp): number => {
+    for (const [key, colIdx] of headerMap.entries()) {
+      if (excludePattern && excludePattern.test(key)) continue;
+      if (pattern.test(key)) return colIdx;
+    }
+    return -1;
+  };
+
+  const colNama = findCol(/(nama.*(guru|pendidik|ptk|lengkap)|^(nama|name|teacher))$/i, /(ayah|ibu|ortu|wali|siswa|sekolah)/i) !== -1
+    ? findCol(/(nama.*(guru|pendidik|ptk|lengkap)|^(nama|name|teacher))$/i, /(ayah|ibu|ortu|wali|siswa|sekolah)/i)
+    : findCol(/nama/i, /(ayah|ibu|ortu|wali|siswa|sekolah)/i);
+  const colNip = findCol(/^nip|nomor\s*induk\s*pegawai/i);
+  const colNuptk = findCol(/nuptk/i);
+  const colJk = findCol(/jenis\s*kelamin|jk|l\/p|gender|sex/i);
+  const colJabatan = findCol(/jabatan|posisi|tugas(\s*utama)?|peran/i);
+  const colJenisGuru = findCol(/jenis\s*(pendidik|guru)|kategori(\s*guru)?|tipe\s*guru/i);
+  const colStatusKepegawaian = findCol(/status\s*(kepegawaian|pegawai|ptk)|kepegawaian/i);
+  const colGolongan = findCol(/golongan|pangkat|gol(\/|\s*)pangkat/i);
+  const colPendidikan = findCol(/pendidikan(\s*terakhir)?|pend(\.|\s*)terakhir/i);
+  const colJurusan = findCol(/jurusan|prodi|program\s*studi/i);
+  const colHp = findCol(/no\.?\s*(hp|wa|whatsapp|telepon|ponsel)|kontak|hp|wa/i);
+  const colEmail = findCol(/email|surel/i);
+  const colAlamat = findCol(/alamat(\s*lengkap)?|domisili/i);
+  const colStatusAktif = findCol(/status(\s*aktif|\s*\(aktif\/cuti\/pensiun\))?$/i, /kepegawaian|ptk|pegawai/i);
+  const colMapel = findCol(/mata\s*pelajaran|mapel|mengajar/i);
+  const colKelas = findCol(/kelas(\s*diampu)?|rombel/i);
+  const colTugasTambahan = findCol(/tugas\s*tambahan/i);
+
+  const dataRows = aoa.slice(headerRowIndex + 1);
+
+  dataRows.forEach((row, rowOffset) => {
+    const actualRowNum = headerRowIndex + rowOffset + 2;
+    if (!Array.isArray(row) || row.length === 0) return;
+
+    // Check if entire row is empty
+    const hasAnyValue = row.some(cell => String(cell || '').trim() !== '');
+    if (!hasAnyValue) return;
+
+    const getVal = (colIdx: number): any => (colIdx >= 0 && colIdx < row.length ? row[colIdx] : '');
+
+    let rawNama = colNama >= 0 ? getVal(colNama) : '';
+    // Heuristic fallback if colNama not found or empty
+    if (!rawNama && row.length > 1) {
+      const candidate = row.find((c, i) => i >= 0 && typeof c === 'string' && c.trim().length > 2 && isNaN(Number(c)));
+      if (candidate) rawNama = candidate;
+    }
+
+    const nama = String(rawNama || '').trim();
+    if (!nama || nama.length < 2) {
+      errors.push(`Baris ${actualRowNum}: Nama guru/tendik kosong atau tidak valid, dilewati.`);
       return;
     }
 
+    // NIP & NUPTK
+    let rawNip = colNip >= 0 ? String(getVal(colNip)).trim() : '';
+    // Format NIP, if it's 0 or empty or '-'
+    const nip = rawNip && rawNip !== '0' && rawNip !== '-' ? rawNip.replace(/[^0-9]/g, '') || rawNip : '-';
+
+    let rawNuptk = colNuptk >= 0 ? String(getVal(colNuptk)).trim() : '';
+    const nuptk = rawNuptk && rawNuptk !== '0' && rawNuptk !== '-' ? rawNuptk.replace(/[^0-9]/g, '') || rawNuptk : undefined;
+
+    // Gender
+    const rawJk = String(colJk >= 0 ? getVal(colJk) : 'L').toUpperCase().trim();
+    let jenisKelamin: 'L' | 'P' = 'L';
+    if (rawJk.startsWith('P') || rawJk.startsWith('W') || rawJk.startsWith('F')) {
+      jenisKelamin = 'P';
+    }
+
+    // Jabatan & Jenis Guru
+    let rawJabatan = colJabatan >= 0 ? String(getVal(colJabatan)).trim() : '';
+    let rawJenisGuru = colJenisGuru >= 0 ? String(getVal(colJenisGuru)).trim() : '';
+
+    if (!rawJabatan && rawJenisGuru) rawJabatan = rawJenisGuru;
+    if (!rawJabatan) rawJabatan = 'Guru Kelas';
+
+    let jenisGuru: 'Kepala Sekolah' | 'Guru Kelas' | 'Guru Mapel' | 'Guru BK' | 'Tenaga Kependidikan' = 'Guru Kelas';
+    const jLow = (rawJenisGuru || rawJabatan).toLowerCase();
+    if (jLow.includes('kepala')) jenisGuru = 'Kepala Sekolah';
+    else if (jLow.includes('kelas') || jLow.includes('wali')) jenisGuru = 'Guru Kelas';
+    else if (jLow.includes('bk') || jLow.includes('bimbingan')) jenisGuru = 'Guru BK';
+    else if (jLow.includes('tendik') || jLow.includes('operator') || jLow.includes('tu') || jLow.includes('tenaga') || jLow.includes('perpustakaan')) {
+      jenisGuru = 'Tenaga Kependidikan';
+    } else {
+      jenisGuru = 'Guru Mapel';
+    }
+
+    // Status Kepegawaian
+    const rawPegawai = colStatusKepegawaian >= 0 ? String(getVal(colStatusKepegawaian)).trim() : 'PNS';
+    let statusKepegawaian: 'PNS' | 'PPPK' | 'GTT / Honorer' | 'Guru Tetap Yayasan' = 'PNS';
+    const pegLow = rawPegawai.toLowerCase();
+    if (pegLow.includes('pppk') || pegLow.includes('p3k')) statusKepegawaian = 'PPPK';
+    else if (pegLow.includes('honorer') || pegLow.includes('gtt') || pegLow.includes('sukwan') || pegLow.includes('tidak tetap')) {
+      statusKepegawaian = 'GTT / Honorer';
+    } else if (pegLow.includes('yayasan') || pegLow.includes('gty')) {
+      statusKepegawaian = 'Guru Tetap Yayasan';
+    } else {
+      statusKepegawaian = 'PNS';
+    }
+
+    // Golongan / Pangkat
+    const golonganPangkat = colGolongan >= 0 ? String(getVal(colGolongan)).trim() : '-';
+
+    // Pendidikan & Jurusan
+    const pendidikanTerakhir = colPendidikan >= 0 ? String(getVal(colPendidikan)).trim() : 'S1 PGSD';
+    const jurusan = colJurusan >= 0 ? String(getVal(colJurusan)).trim() : '';
+
+    // Kontak & Alamat
+    let noHp = colHp >= 0 ? String(getVal(colHp)).trim() : '';
+    if (noHp.startsWith("'")) noHp = noHp.slice(1);
+    const email = colEmail >= 0 ? String(getVal(colEmail)).trim() : '';
+    const alamat = colAlamat >= 0 ? String(getVal(colAlamat)).trim() : '';
+
+    // Status Aktif
+    const rawStatus = colStatusAktif >= 0 ? String(getVal(colStatusAktif)).trim() : 'Aktif';
+    let statusAktif: 'Aktif' | 'Cuti' | 'Pensiun' | 'Mutasi' = 'Aktif';
+    const stLow = rawStatus.toLowerCase();
+    if (stLow.includes('cuti')) statusAktif = 'Cuti';
+    else if (stLow.includes('pensiun')) statusAktif = 'Pensiun';
+    else if (stLow.includes('mutasi') || stLow.includes('pindah')) statusAktif = 'Mutasi';
+
+    // Mata Pelajaran Diampu
+    const mapelString = colMapel >= 0 ? String(getVal(colMapel)).trim() : '';
     const mapelList = mapelString
-      ? String(mapelString).split(/[,;]/).map((m: string) => m.trim()).filter(Boolean)
+      ? mapelString.split(/[,;]/).map((m: string) => m.trim()).filter(Boolean)
       : [];
 
+    const kelasDiampu = colKelas >= 0 ? String(getVal(colKelas)).trim() : undefined;
+    const tugasTambahan = colTugasTambahan >= 0 ? String(getVal(colTugasTambahan)).trim() : undefined;
+
+    // Unique ID
+    const cleanNip = nip !== '-' ? nip : '';
+    const safeId = cleanNip
+      ? `guru_${cleanNip}`
+      : `guru_${Date.now().toString().slice(-6)}_${data.length + 1}`;
+
+    const fotoUrl = jenisKelamin === 'P'
+      ? `https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80`
+      : `https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80`;
+
     data.push({
-      id: nip && nip !== '-' ? `t_${nip}` : `t_${Date.now()}_${idx}`,
+      id: safeId,
       nip: nip || '-',
-      nuptk: nuptk || undefined,
-      nama: String(nama).trim(),
+      nuptk,
+      nama,
       jenisKelamin,
-      jabatan: String(jabatan).trim(),
-      jenisGuru: (['Kepala Sekolah', 'Guru Kelas', 'Guru Mapel', 'Guru BK', 'Tenaga Kependidikan'].includes(jenisGuru) ? jenisGuru : 'Guru Mapel') as any,
-      statusKepegawaian: (['PNS', 'PPPK', 'GTT / Honorer', 'Guru Tetap Yayasan'].includes(statusKepegawaian) ? statusKepegawaian : 'PNS') as any,
-      golonganPangkat: String(golonganPangkat).trim(),
-      pendidikanTerakhir: String(pendidikanTerakhir).trim(),
-      jurusan: String(jurusan).trim(),
-      noHp: String(noHp).trim(),
-      email: String(email).trim(),
-      alamat: String(alamat).trim(),
-      statusAktif: (['Aktif', 'Cuti', 'Pensiun', 'Mutasi'].includes(statusAktif) ? statusAktif : 'Aktif') as any,
-      mataPelajaranUtama: mapelList,
-      fotoUrl: `https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80`
+      jabatan: rawJabatan,
+      jenisGuru,
+      statusKepegawaian,
+      golonganPangkat: golonganPangkat || '-',
+      pendidikanTerakhir: pendidikanTerakhir || 'S1',
+      jurusan: jurusan || undefined,
+      noHp: noHp || '-',
+      email: email || '',
+      alamat: alamat || '-',
+      statusAktif,
+      mataPelajaranUtama: mapelList.length > 0 ? mapelList : undefined,
+      kelasDiampu,
+      tugasTambahan,
+      fotoUrl
     });
   });
 
   return {
     data,
     errors,
-    totalRows: rawRows.length,
+    totalRows: dataRows.length,
     validRows: data.length
   };
 }
@@ -1651,37 +1843,120 @@ export function parseGradesAndTPFromWorkbook(
   return { gradesResult, tpResult };
 }
 
-// Parse Cash Transactions
+// Helper to find worksheet containing Cash / Keuangan
+export function findCashWorksheet(wb: XLSX.WorkBook): { sheetName: string; ws: XLSX.WorkSheet } | null {
+  if (!wb || !wb.SheetNames || wb.SheetNames.length === 0) return null;
+
+  const candidateNames = wb.SheetNames.filter(name =>
+    /kas|cash|keuangan|iuran|transaksi/i.test(name)
+  );
+  if (candidateNames.length > 0) {
+    return { sheetName: candidateNames[0], ws: wb.Sheets[candidateNames[0]] };
+  }
+
+  for (const sheetName of wb.SheetNames) {
+    const ws = wb.Sheets[sheetName];
+    if (!ws) continue;
+    const aoa: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    for (let r = 0; r < Math.min(10, aoa.length); r++) {
+      const row = aoa[r];
+      if (!Array.isArray(row)) continue;
+      const cells = row.map(c => String(c || '').toLowerCase().trim());
+      const hasDate = cells.some(c => c.includes('tanggal') || c.includes('tgl'));
+      const hasMoney = cells.some(c => c.includes('jumlah') || c.includes('nominal') || c.includes('saldo') || c.includes('kas'));
+      if (hasDate && hasMoney) {
+        return { sheetName, ws };
+      }
+    }
+  }
+
+  return wb.SheetNames.length === 1 ? { sheetName: wb.SheetNames[0], ws: wb.Sheets[wb.SheetNames[0]] } : null;
+}
+
+// Parse Cash Transactions with dynamic row recognition
 export function parseCashFromSheet(ws: XLSX.WorkSheet): ParsedExcelResult<Partial<CashTransaction>> {
-  const rawRows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+  const aoa: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
   const data: Partial<CashTransaction>[] = [];
   const errors: string[] = [];
 
-  rawRows.forEach((row, idx) => {
-    const rowNum = idx + 2;
-    const tanggal = String(row['Tanggal (YYYY-MM-DD)'] || row['Tanggal'] || new Date().toISOString().split('T')[0]).trim();
-    const jenisRaw = String(row['Jenis (Pemasukan/Pengeluaran)'] || row['Jenis'] || 'Pemasukan').trim();
-    const jenis: 'Pemasukan' | 'Pengeluaran' = jenisRaw.toLowerCase().includes('keluar') ? 'Pengeluaran' : 'Pemasukan';
-    const kategori = row['Kategori Transaksi'] || row['Kategori'] || 'Lainnya';
-    const keterangan = row['Keterangan Rinci'] || row['Keterangan'] || '';
-    const jumlahRaw = row['Nominal / Jumlah (Rp)'] || row['Jumlah'] || row['Nominal'] || 0;
-    const jumlah = Math.abs(Number(jumlahRaw) || 0);
-    const penanggungJawab = row['Penanggung Jawab / Bendahara'] || row['Penanggung Jawab'] || 'Bendahara Kelas';
-    const namaSiswa = row['Nama Siswa (Jika Iuran Kas)'] || row['Nama Siswa'] || '';
+  if (!aoa || aoa.length === 0) {
+    return { data, errors: ['Lembar sheet data kas kosong.'], totalRows: 0, validRows: 0 };
+  }
+
+  let headerRowIndex = -1;
+  for (let r = 0; r < Math.min(10, aoa.length); r++) {
+    const row = aoa[r];
+    if (!Array.isArray(row)) continue;
+    const cells = row.map(c => String(c || '').toLowerCase().trim());
+    const hasDate = cells.some(c => c.includes('tanggal') || c.includes('tgl'));
+    const hasTrx = cells.some(c => c.includes('jenis') || c.includes('keterangan') || c.includes('nominal') || c.includes('jumlah'));
+    if (hasDate && hasTrx) {
+      headerRowIndex = r;
+      break;
+    }
+  }
+
+  if (headerRowIndex === -1) headerRowIndex = 0;
+
+  const rawHeaders: string[] = (aoa[headerRowIndex] || []).map(h => String(h || '').trim());
+  const headerMap = new Map<string, number>();
+  rawHeaders.forEach((h, idx) => {
+    if (h) headerMap.set(h.toLowerCase(), idx);
+  });
+
+  const findCol = (pattern: RegExp): number => {
+    for (const [key, idx] of headerMap.entries()) {
+      if (pattern.test(key)) return idx;
+    }
+    return -1;
+  };
+
+  const colTanggal = findCol(/tanggal|tgl|date/i);
+  const colJenis = findCol(/jenis|tipe/i);
+  const colKategori = findCol(/kategori/i);
+  const colKeterangan = findCol(/keterangan|uraian|deskripsi/i);
+  const colJumlah = findCol(/nominal|jumlah|debit|kredit|rp/i);
+  const colPenanggungJawab = findCol(/penanggung\s*jawab|bendahara|petugas/i);
+  const colNamaSiswa = findCol(/nama\s*siswa|siswa/i);
+
+  const dataRows = aoa.slice(headerRowIndex + 1);
+
+  dataRows.forEach((row, rowOffset) => {
+    const actualRowNum = headerRowIndex + rowOffset + 2;
+    if (!Array.isArray(row) || row.length === 0) return;
+    const hasAny = row.some(c => String(c || '').trim() !== '');
+    if (!hasAny) return;
+
+    const getVal = (idx: number): any => (idx >= 0 && idx < row.length ? row[idx] : '');
+
+    const rawTgl = colTanggal >= 0 ? getVal(colTanggal) : '';
+    const tanggal = formatExcelDate(rawTgl) || new Date().toISOString().split('T')[0];
+
+    const rawJenis = colJenis >= 0 ? String(getVal(colJenis)).trim().toLowerCase() : 'pemasukan';
+    const jenis: 'Pemasukan' | 'Pengeluaran' = rawJenis.includes('keluar') || rawJenis.includes('out') ? 'Pengeluaran' : 'Pemasukan';
+
+    const kategori = colKategori >= 0 ? String(getVal(colKategori)).trim() : 'Lainnya';
+    const keterangan = colKeterangan >= 0 ? String(getVal(colKeterangan)).trim() : '';
+
+    const rawJumlah = colJumlah >= 0 ? getVal(colJumlah) : 0;
+    const jumlah = Math.abs(Number(String(rawJumlah).replace(/[^0-9.-]/g, '')) || 0);
+
+    const penanggungJawab = colPenanggungJawab >= 0 ? String(getVal(colPenanggungJawab)).trim() : 'Bendahara Kelas';
+    const namaSiswa = colNamaSiswa >= 0 ? String(getVal(colNamaSiswa)).trim() : '';
 
     if (!keterangan || jumlah <= 0) {
-      errors.push(`Baris ${rowNum}: Keterangan kosong atau jumlah nominal <= 0.`);
+      errors.push(`Baris ${actualRowNum}: Keterangan kosong atau nominal <= 0.`);
       return;
     }
 
     data.push({
-      id: `tx_${Date.now()}_${idx}`,
+      id: `tx_${Date.now()}_${rowOffset}`,
       tanggal,
       jenis,
-      kategori,
+      kategori: kategori || 'Lainnya',
       keterangan,
       jumlah,
-      penanggungJawab,
+      penanggungJawab: penanggungJawab || 'Bendahara Kelas',
       namaSiswa: namaSiswa || undefined,
       saldoSetelah: 0
     });
@@ -1690,49 +1965,138 @@ export function parseCashFromSheet(ws: XLSX.WorkSheet): ParsedExcelResult<Partia
   return {
     data,
     errors,
-    totalRows: rawRows.length,
+    totalRows: dataRows.length,
     validRows: data.length
   };
 }
 
-// Parse Inventory Items
+// Helper to find worksheet containing Inventory
+export function findInventoryWorksheet(wb: XLSX.WorkBook): { sheetName: string; ws: XLSX.WorkSheet } | null {
+  if (!wb || !wb.SheetNames || wb.SheetNames.length === 0) return null;
+
+  const candidateNames = wb.SheetNames.filter(name =>
+    /inventaris|inventory|barang|aset|kir/i.test(name)
+  );
+  if (candidateNames.length > 0) {
+    return { sheetName: candidateNames[0], ws: wb.Sheets[candidateNames[0]] };
+  }
+
+  for (const sheetName of wb.SheetNames) {
+    const ws = wb.Sheets[sheetName];
+    if (!ws) continue;
+    const aoa: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    for (let r = 0; r < Math.min(10, aoa.length); r++) {
+      const row = aoa[r];
+      if (!Array.isArray(row)) continue;
+      const cells = row.map(c => String(c || '').toLowerCase().trim());
+      const hasItem = cells.some(c => c.includes('barang') || c.includes('aset'));
+      const hasQty = cells.some(c => c.includes('jumlah') || c.includes('kondisi') || c.includes('satuan'));
+      if (hasItem && hasQty) {
+        return { sheetName, ws };
+      }
+    }
+  }
+
+  return wb.SheetNames.length === 1 ? { sheetName: wb.SheetNames[0], ws: wb.Sheets[wb.SheetNames[0]] } : null;
+}
+
+// Parse Inventory Items with dynamic row recognition
 export function parseInventoryFromSheet(ws: XLSX.WorkSheet): ParsedExcelResult<Partial<InventoryItem>> {
-  const rawRows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+  const aoa: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
   const data: Partial<InventoryItem>[] = [];
   const errors: string[] = [];
 
-  rawRows.forEach((row, idx) => {
-    const rowNum = idx + 2;
-    const kodeBarang = String(row['Kode Barang'] || row['Kode'] || `BRG-${idx + 1}`).trim();
-    const namaBarang = String(row['Nama Barang / Aset'] || row['Nama Barang'] || '').trim();
-    const spesifikasi = row['Spesifikasi / Merk / Bahan'] || row['Spesifikasi'] || '';
-    const kategori = row['Kategori'] || 'Perabot';
-    const jumlah = Number(row['Jumlah'] || 1);
-    const satuan = row['Satuan (Unit/Pcs/Set)'] || row['Satuan'] || 'Unit';
-    const kondisiRaw = String(row['Kondisi (Baik/Rusak Ringan/Rusak Berat)'] || row['Kondisi'] || 'Baik').trim();
-    let kondisi: 'Baik' | 'Rusak Ringan' | 'Rusak Berat' = 'Baik';
-    if (kondisiRaw.toLowerCase().includes('berat')) kondisi = 'Rusak Berat';
-    else if (kondisiRaw.toLowerCase().includes('ringan')) kondisi = 'Rusak Ringan';
-    
-    const tahunPengadaan = Number(row['Tahun Pengadaan'] || row['Tahun'] || new Date().getFullYear());
-    const sumberDana = row['Sumber Dana (BOS/Paguyuban/Bantuan)'] || row['Sumber Dana'] || 'BOS Reguler';
-    const keterangan = row['Keterangan Lokasi'] || row['Keterangan'] || '';
+  if (!aoa || aoa.length === 0) {
+    return { data, errors: ['Lembar sheet inventaris kosong.'], totalRows: 0, validRows: 0 };
+  }
 
+  let headerRowIndex = -1;
+  for (let r = 0; r < Math.min(10, aoa.length); r++) {
+    const row = aoa[r];
+    if (!Array.isArray(row)) continue;
+    const cells = row.map(c => String(c || '').toLowerCase().trim());
+    const hasItem = cells.some(c => c.includes('barang') || c.includes('aset'));
+    const hasDetails = cells.some(c => c.includes('kode') || c.includes('jumlah') || c.includes('kondisi'));
+    if (hasItem && hasDetails) {
+      headerRowIndex = r;
+      break;
+    }
+  }
+
+  if (headerRowIndex === -1) headerRowIndex = 0;
+
+  const rawHeaders: string[] = (aoa[headerRowIndex] || []).map(h => String(h || '').trim());
+  const headerMap = new Map<string, number>();
+  rawHeaders.forEach((h, idx) => {
+    if (h) headerMap.set(h.toLowerCase(), idx);
+  });
+
+  const findCol = (pattern: RegExp): number => {
+    for (const [key, idx] of headerMap.entries()) {
+      if (pattern.test(key)) return idx;
+    }
+    return -1;
+  };
+
+  const colKode = findCol(/kode/i);
+  const colNama = findCol(/nama.*barang|barang|nama.*aset|aset/i);
+  const colSpek = findCol(/spesifikasi|merk|bahan/i);
+  const colKategori = findCol(/kategori/i);
+  const colJumlah = findCol(/jumlah|qty|banyak/i);
+  const colSatuan = findCol(/satuan/i);
+  const colKondisi = findCol(/kondisi/i);
+  const colTahun = findCol(/tahun/i);
+  const colSumber = findCol(/sumber.*dana|sumber/i);
+  const colKet = findCol(/keterangan|lokasi|ruang/i);
+
+  const dataRows = aoa.slice(headerRowIndex + 1);
+
+  dataRows.forEach((row, rowOffset) => {
+    const actualRowNum = headerRowIndex + rowOffset + 2;
+    if (!Array.isArray(row) || row.length === 0) return;
+    const hasAny = row.some(c => String(c || '').trim() !== '');
+    if (!hasAny) return;
+
+    const getVal = (idx: number): any => (idx >= 0 && idx < row.length ? row[idx] : '');
+
+    const namaBarang = String(colNama >= 0 ? getVal(colNama) : '').trim();
     if (!namaBarang) {
-      errors.push(`Baris ${rowNum}: Nama barang kosong.`);
+      errors.push(`Baris ${actualRowNum}: Nama barang/sarpras kosong, dilewati.`);
       return;
     }
 
+    const rawKode = colKode >= 0 ? String(getVal(colKode)).trim() : '';
+    const kodeBarang = rawKode || `BRG-${rowOffset + 1}`;
+    const spesifikasi = colSpek >= 0 ? String(getVal(colSpek)).trim() : '';
+    const kategori = colKategori >= 0 ? String(getVal(colKategori)).trim() : 'Perabot';
+
+    const rawJumlah = colJumlah >= 0 ? getVal(colJumlah) : 1;
+    const jumlahNum = Number(rawJumlah);
+    const jumlah = !isNaN(jumlahNum) && jumlahNum > 0 ? jumlahNum : 1;
+
+    const satuan = colSatuan >= 0 ? String(getVal(colSatuan)).trim() || 'Unit' : 'Unit';
+
+    const rawKondisi = colKondisi >= 0 ? String(getVal(colKondisi)).trim().toLowerCase() : 'baik';
+    let kondisi: 'Baik' | 'Rusak Ringan' | 'Rusak Berat' = 'Baik';
+    if (rawKondisi.includes('berat')) kondisi = 'Rusak Berat';
+    else if (rawKondisi.includes('ringan')) kondisi = 'Rusak Ringan';
+
+    const rawTahun = colTahun >= 0 ? Number(getVal(colTahun)) : new Date().getFullYear();
+    const tahunPengadaan = !isNaN(rawTahun) && rawTahun > 1990 ? rawTahun : new Date().getFullYear();
+
+    const sumberDana = colSumber >= 0 ? String(getVal(colSumber)).trim() || 'BOS Reguler' : 'BOS Reguler';
+    const keterangan = colKet >= 0 ? String(getVal(colKet)).trim() : '';
+
     data.push({
-      id: `inv_${Date.now()}_${idx}`,
+      id: `inv_${Date.now()}_${rowOffset}`,
       kodeBarang,
       namaBarang,
       spesifikasi,
       kategori,
-      jumlah: isNaN(jumlah) || jumlah < 1 ? 1 : jumlah,
+      jumlah,
       satuan,
       kondisi,
-      tahunPengadaan: isNaN(tahunPengadaan) ? 2024 : tahunPengadaan,
+      tahunPengadaan,
       sumberDana,
       keterangan
     });
@@ -1741,7 +2105,276 @@ export function parseInventoryFromSheet(ws: XLSX.WorkSheet): ParsedExcelResult<P
   return {
     data,
     errors,
-    totalRows: rawRows.length,
+    totalRows: dataRows.length,
+    validRows: data.length
+  };
+}
+
+// Helper to find worksheet containing Attendance / Presensi
+export function findAttendanceWorksheet(wb: XLSX.WorkBook): { sheetName: string; ws: XLSX.WorkSheet } | null {
+  if (!wb || !wb.SheetNames || wb.SheetNames.length === 0) return null;
+
+  const candidateNames = wb.SheetNames.filter(name =>
+    /presensi|absensi|kehadiran|attendance/i.test(name)
+  );
+  if (candidateNames.length > 0) {
+    return { sheetName: candidateNames[0], ws: wb.Sheets[candidateNames[0]] };
+  }
+
+  for (const sheetName of wb.SheetNames) {
+    const ws = wb.Sheets[sheetName];
+    if (!ws) continue;
+    const aoa: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    for (let r = 0; r < Math.min(10, aoa.length); r++) {
+      const row = aoa[r];
+      if (!Array.isArray(row)) continue;
+      const cells = row.map(c => String(c || '').toLowerCase().trim());
+      const hasStudent = cells.some(c => c.includes('nama') || c.includes('nisn'));
+      const hasAttendance = cells.some(c => c.includes('kehadiran') || c.includes('hadir') || c.includes('sakit') || c.includes('status'));
+      if (hasStudent && hasAttendance) {
+        return { sheetName, ws };
+      }
+    }
+  }
+
+  return wb.SheetNames.length === 1 ? { sheetName: wb.SheetNames[0], ws: wb.Sheets[wb.SheetNames[0]] } : null;
+}
+
+// Parse Attendance from Sheet
+export function parseAttendanceFromSheet(
+  ws: XLSX.WorkSheet,
+  students: Student[]
+): ParsedExcelResult<AttendanceRecord> {
+  const aoa: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+  const data: AttendanceRecord[] = [];
+  const errors: string[] = [];
+
+  if (!aoa || aoa.length === 0) {
+    return { data, errors: ['Lembar sheet data presensi kosong.'], totalRows: 0, validRows: 0 };
+  }
+
+  let headerRowIndex = -1;
+  for (let r = 0; r < Math.min(10, aoa.length); r++) {
+    const row = aoa[r];
+    if (!Array.isArray(row)) continue;
+    const cells = row.map(c => String(c || '').toLowerCase().trim());
+    const hasStudent = cells.some(c => c.includes('nama') || c.includes('nisn') || c.includes('absen'));
+    const hasStatus = cells.some(c => c.includes('kehadiran') || c.includes('status') || c.includes('hadir'));
+    if (hasStudent && hasStatus) {
+      headerRowIndex = r;
+      break;
+    }
+  }
+
+  if (headerRowIndex === -1) headerRowIndex = 0;
+
+  const rawHeaders: string[] = (aoa[headerRowIndex] || []).map(h => String(h || '').trim());
+  const headerMap = new Map<string, number>();
+  rawHeaders.forEach((h, idx) => {
+    if (h) headerMap.set(h.toLowerCase(), idx);
+  });
+
+  const findCol = (pattern: RegExp): number => {
+    for (const [key, idx] of headerMap.entries()) {
+      if (pattern.test(key)) return idx;
+    }
+    return -1;
+  };
+
+  const colNisn = findCol(/nisn/i);
+  const colNama = findCol(/nama/i);
+  const colTanggal = findCol(/tanggal|tgl|date/i);
+  const colStatus = findCol(/status|kehadiran/i);
+  const colCatatan = findCol(/keterangan|alasan|catatan/i);
+
+  const dataRows = aoa.slice(headerRowIndex + 1);
+
+  dataRows.forEach((row, rowOffset) => {
+    const actualRowNum = headerRowIndex + rowOffset + 2;
+    if (!Array.isArray(row) || row.length === 0) return;
+    const hasAny = row.some(c => String(c || '').trim() !== '');
+    if (!hasAny) return;
+
+    const getVal = (idx: number): any => (idx >= 0 && idx < row.length ? row[idx] : '');
+
+    const rawNisn = colNisn >= 0 ? String(getVal(colNisn)).trim() : '';
+    const rawNama = colNama >= 0 ? String(getVal(colNama)).trim() : '';
+
+    let student: Student | undefined;
+    if (rawNisn) {
+      student = students.find(s => s.nisn === rawNisn || s.nis === rawNisn);
+    }
+    if (!student && rawNama) {
+      student = students.find(s => s.nama.toLowerCase().trim() === rawNama.toLowerCase());
+    }
+
+    if (!student) {
+      errors.push(`Baris ${actualRowNum}: Siswa '${rawNama || rawNisn}' tidak ditemukan dalam daftar siswa.`);
+      return;
+    }
+
+    const rawTgl = colTanggal >= 0 ? getVal(colTanggal) : '';
+    const tanggal = formatExcelDate(rawTgl) || new Date().toISOString().split('T')[0];
+
+    const rawStatus = colStatus >= 0 ? String(getVal(colStatus)).trim().toLowerCase() : 'hadir';
+    let status: 'Hadir' | 'Sakit' | 'Izin' | 'Alpa' = 'Hadir';
+    if (rawStatus.includes('sakit') || rawStatus === 's') status = 'Sakit';
+    else if (rawStatus.includes('izin') || rawStatus === 'i') status = 'Izin';
+    else if (rawStatus.includes('alpa') || rawStatus.includes('alpha') || rawStatus === 'a' || rawStatus.includes('tanpa')) status = 'Alpa';
+
+    const keterangan = colCatatan >= 0 ? String(getVal(colCatatan)).trim() : undefined;
+
+    data.push({
+      id: `att_${student.id}_${tanggal}`,
+      siswaId: student.id,
+      tanggal,
+      status,
+      keterangan,
+      waktuInput: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+    });
+  });
+
+  return {
+    data,
+    errors,
+    totalRows: dataRows.length,
+    validRows: data.length
+  };
+}
+
+// Helper to find worksheet containing Timetable Schedule
+export function findScheduleWorksheet(wb: XLSX.WorkBook): { sheetName: string; ws: XLSX.WorkSheet } | null {
+  if (!wb || !wb.SheetNames || wb.SheetNames.length === 0) return null;
+
+  const candidateNames = wb.SheetNames.filter(name =>
+    /jadwal|schedule|timetable/i.test(name)
+  );
+  if (candidateNames.length > 0) {
+    return { sheetName: candidateNames[0], ws: wb.Sheets[candidateNames[0]] };
+  }
+
+  for (const sheetName of wb.SheetNames) {
+    const ws = wb.Sheets[sheetName];
+    if (!ws) continue;
+    const aoa: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    for (let r = 0; r < Math.min(10, aoa.length); r++) {
+      const row = aoa[r];
+      if (!Array.isArray(row)) continue;
+      const cells = row.map(c => String(c || '').toLowerCase().trim());
+      const hasDay = cells.some(c => c.includes('hari') || c.includes('senin') || c.includes('selasa'));
+      const hasMapel = cells.some(c => c.includes('mapel') || c.includes('pelajaran') || c.includes('guru'));
+      if (hasDay && hasMapel) {
+        return { sheetName, ws };
+      }
+    }
+  }
+
+  return wb.SheetNames.length === 1 ? { sheetName: wb.SheetNames[0], ws: wb.Sheets[wb.SheetNames[0]] } : null;
+}
+
+// Parse Schedule from Sheet
+export function parseScheduleFromSheet(
+  ws: XLSX.WorkSheet,
+  subjects: Subject[] = []
+): ParsedExcelResult<ScheduleItem> {
+  const aoa: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+  const data: ScheduleItem[] = [];
+  const errors: string[] = [];
+
+  if (!aoa || aoa.length === 0) {
+    return { data, errors: ['Lembar sheet jadwal kosong.'], totalRows: 0, validRows: 0 };
+  }
+
+  let headerRowIndex = -1;
+  for (let r = 0; r < Math.min(10, aoa.length); r++) {
+    const row = aoa[r];
+    if (!Array.isArray(row)) continue;
+    const cells = row.map(c => String(c || '').toLowerCase().trim());
+    const hasDay = cells.some(c => c.includes('hari') || c.includes('day'));
+    const hasDetails = cells.some(c => c.includes('mapel') || c.includes('pelajaran') || c.includes('jam') || c.includes('waktu'));
+    if (hasDay && hasDetails) {
+      headerRowIndex = r;
+      break;
+    }
+  }
+
+  if (headerRowIndex === -1) headerRowIndex = 0;
+
+  const rawHeaders: string[] = (aoa[headerRowIndex] || []).map(h => String(h || '').trim());
+  const headerMap = new Map<string, number>();
+  rawHeaders.forEach((h, idx) => {
+    if (h) headerMap.set(h.toLowerCase(), idx);
+  });
+
+  const findCol = (pattern: RegExp): number => {
+    for (const [key, idx] of headerMap.entries()) {
+      if (pattern.test(key)) return idx;
+    }
+    return -1;
+  };
+
+  const colHari = findCol(/hari|day/i);
+  const colJam = findCol(/jam.*ke|ke/i);
+  const colWaktu = findCol(/waktu|pukul|jam/i);
+  const colKode = findCol(/kode/i);
+  const colMapel = findCol(/nama.*mapel|mapel|mata.*pelajaran/i);
+  const colGuru = findCol(/guru|pengampu|pendidik/i);
+  const colRuang = findCol(/ruang|kelas/i);
+  const colCatatan = findCol(/topik|catatan|materi/i);
+
+  const dataRows = aoa.slice(headerRowIndex + 1);
+
+  dataRows.forEach((row, rowOffset) => {
+    const actualRowNum = headerRowIndex + rowOffset + 2;
+    if (!Array.isArray(row) || row.length === 0) return;
+    const hasAny = row.some(c => String(c || '').trim() !== '');
+    if (!hasAny) return;
+
+    const getVal = (idx: number): any => (idx >= 0 && idx < row.length ? row[idx] : '');
+
+    const rawHari = colHari >= 0 ? String(getVal(colHari)).trim().toLowerCase() : 'senin';
+    let hari: 'Senin' | 'Selasa' | 'Rabu' | 'Kamis' | 'Jumat' | 'Sabtu' = 'Senin';
+    if (rawHari.includes('selasa')) hari = 'Selasa';
+    else if (rawHari.includes('rabu')) hari = 'Rabu';
+    else if (rawHari.includes('kamis')) hari = 'Kamis';
+    else if (rawHari.includes('jumat') || rawHari.includes("jum'at")) hari = 'Jumat';
+    else if (rawHari.includes('sabtu')) hari = 'Sabtu';
+
+    const rawJam = colJam >= 0 ? Number(getVal(colJam)) : 1;
+    const jamKe = !isNaN(rawJam) && rawJam > 0 ? rawJam : 1;
+
+    const waktu = colWaktu >= 0 ? String(getVal(colWaktu)).trim() || '07.30 - 08.05' : '07.30 - 08.05';
+
+    const rawKode = colKode >= 0 ? String(getVal(colKode)).trim().toUpperCase() : '';
+    const rawMapel = colMapel >= 0 ? String(getVal(colMapel)).trim() : '';
+
+    let subject = subjects.find(s => s.kode.toUpperCase() === rawKode);
+    if (!subject && rawMapel) {
+      subject = subjects.find(s => s.nama.toLowerCase().includes(rawMapel.toLowerCase()) || rawMapel.toLowerCase().includes(s.nama.toLowerCase()));
+    }
+    const mapelId = subject ? subject.id : (subjects[0]?.id || 's1');
+
+    const guruPengampu = colGuru >= 0 ? String(getVal(colGuru)).trim() : (subject?.guruPengampu || 'Guru Pengampu');
+    const ruang = colRuang >= 0 ? String(getVal(colRuang)).trim() : 'Ruang Kelas';
+    const catatan = colCatatan >= 0 ? String(getVal(colCatatan)).trim() : undefined;
+
+    data.push({
+      id: `sch_${hari.toLowerCase()}_${jamKe}`,
+      hari,
+      jamKe,
+      waktu,
+      mapelId,
+      guruPengampu,
+      ruang,
+      warnaBadge: 'blue',
+      catatanPerlengkapan: catatan
+    });
+  });
+
+  return {
+    data,
+    errors,
+    totalRows: dataRows.length,
     validRows: data.length
   };
 }

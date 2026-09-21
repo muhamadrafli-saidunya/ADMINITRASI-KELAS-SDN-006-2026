@@ -37,16 +37,23 @@ import {
   exportAllDataToExcel,
   parseExcelFile,
   findStudentWorksheet,
+  findTeacherWorksheet,
   findGradeWorksheet,
   findTPWorksheet,
+  findCashWorksheet,
+  findInventoryWorksheet,
+  findAttendanceWorksheet,
+  findScheduleWorksheet,
   parseStudentsFromSheet,
   parseTeachersFromSheet,
   parseGradesFromSheet,
   parseTPFromSheet,
   parseCashFromSheet,
-  parseInventoryFromSheet
+  parseInventoryFromSheet,
+  parseAttendanceFromSheet,
+  parseScheduleFromSheet
 } from '../../utils/excelHelper';
-import { Student, Teacher, GradeRecord, CashTransaction, InventoryItem, TujuanPembelajaran } from '../../types';
+import { Student, Teacher, GradeRecord, CashTransaction, InventoryItem, TujuanPembelajaran, AttendanceRecord, ScheduleItem } from '../../types';
 import { syncTeacher, syncGrade, syncTransaction, syncInventoryItem } from '../../services/firestoreSync';
 
 type ImportCategory = 
@@ -70,10 +77,16 @@ export const ImportExcelView: React.FC = () => {
     schedule,
     tujuanPembelajaranList,
     schoolInfo,
+    attendanceRecords,
     addToast,
     bulkImportStudents,
+    bulkImportTeachers,
     bulkImportGrades,
     bulkImportTP,
+    bulkImportAttendance,
+    bulkImportSchedule,
+    bulkImportCash,
+    bulkImportInventory,
     setCurrentTab
   } = useApp();
 
@@ -138,7 +151,7 @@ export const ImportExcelView: React.FC = () => {
       icon: <CalendarCheck className="h-5 w-5" />,
       color: 'text-amber-500',
       activeBg: 'bg-amber-50 dark:bg-amber-950/40 border-amber-500 text-amber-700 dark:text-amber-300',
-      currentCount: 30
+      currentCount: attendanceRecords.length
     },
     {
       id: 'jadwal',
@@ -277,7 +290,9 @@ export const ImportExcelView: React.FC = () => {
         if (!ws) throw new Error('Lembar sheet Excel Siswa tidak ditemukan.');
         result = parseStudentsFromSheet(ws, schoolInfo.className);
       } else if (activeCategory === 'guru') {
-        const ws = wb.Sheets[wb.SheetNames[0]];
+        const found = findTeacherWorksheet(wb);
+        const ws = found ? found.ws : wb.Sheets[wb.SheetNames[0]];
+        if (!ws) throw new Error('Lembar sheet Excel Guru & Tendik tidak ditemukan.');
         result = parseTeachersFromSheet(ws);
       } else if (activeCategory === 'nilai') {
         // Intelligently find grade worksheet
@@ -309,11 +324,25 @@ export const ImportExcelView: React.FC = () => {
             setCompanionGradesData(gradeRes.data);
           }
         }
+      } else if (activeCategory === 'presensi') {
+        const found = findAttendanceWorksheet(wb);
+        const ws = found ? found.ws : wb.Sheets[wb.SheetNames[0]];
+        if (!ws) throw new Error('Lembar sheet Presensi tidak ditemukan dalam file Excel.');
+        result = parseAttendanceFromSheet(ws, students);
+      } else if (activeCategory === 'jadwal') {
+        const found = findScheduleWorksheet(wb);
+        const ws = found ? found.ws : wb.Sheets[wb.SheetNames[0]];
+        if (!ws) throw new Error('Lembar sheet Jadwal Pelajaran tidak ditemukan dalam file Excel.');
+        result = parseScheduleFromSheet(ws, subjects);
       } else if (activeCategory === 'kas') {
-        const ws = wb.Sheets[wb.SheetNames[0]];
+        const found = findCashWorksheet(wb);
+        const ws = found ? found.ws : wb.Sheets[wb.SheetNames[0]];
+        if (!ws) throw new Error('Lembar sheet Kas Kelas tidak ditemukan dalam file Excel.');
         result = parseCashFromSheet(ws);
       } else if (activeCategory === 'inventaris') {
-        const ws = wb.Sheets[wb.SheetNames[0]];
+        const found = findInventoryWorksheet(wb);
+        const ws = found ? found.ws : wb.Sheets[wb.SheetNames[0]];
+        if (!ws) throw new Error('Lembar sheet Inventaris tidak ditemukan dalam file Excel.');
         result = parseInventoryFromSheet(ws);
       } else {
         const ws = wb.Sheets[wb.SheetNames[0]];
@@ -356,22 +385,7 @@ export const ImportExcelView: React.FC = () => {
       if (activeCategory === 'siswa') {
         bulkImportStudents(parsedData as Student[], importMode);
       } else if (activeCategory === 'guru') {
-        const savedTeachers = localStorage.getItem('admin_kelas_sd_v1_teachers');
-        let currentList: Teacher[] = savedTeachers ? JSON.parse(savedTeachers) : teachers;
-
-        if (importMode === 'replace') {
-          currentList = parsedData as Teacher[];
-        } else {
-          const map = new Map<string, Teacher>();
-          currentList.forEach(t => map.set(t.nip || t.id, t));
-          (parsedData as Teacher[]).forEach(t => map.set(t.nip || t.id, { ...(map.get(t.nip || t.id) || {}), ...t }));
-          currentList = Array.from(map.values());
-        }
-
-        localStorage.setItem('admin_kelas_sd_v1_teachers', JSON.stringify(currentList));
-        for (const t of parsedData) {
-          syncTeacher(t).catch(console.error);
-        }
+        bulkImportTeachers(parsedData as Teacher[], importMode);
       } else if (activeCategory === 'nilai') {
         bulkImportGrades(parsedData as GradeRecord[], importMode);
         if (companionTPData && companionTPData.length > 0) {
@@ -382,37 +396,14 @@ export const ImportExcelView: React.FC = () => {
         if (companionGradesData && companionGradesData.length > 0) {
           bulkImportGrades(companionGradesData, importMode);
         }
+      } else if (activeCategory === 'presensi') {
+        bulkImportAttendance(parsedData as AttendanceRecord[], importMode);
+      } else if (activeCategory === 'jadwal') {
+        bulkImportSchedule(parsedData as ScheduleItem[], importMode);
       } else if (activeCategory === 'kas') {
-        const savedCash = localStorage.getItem('admin_kelas_sd_v1_transactions');
-        let currentCash: CashTransaction[] = savedCash ? JSON.parse(savedCash) : cashTransactions;
-
-        if (importMode === 'replace') {
-          currentCash = parsedData as CashTransaction[];
-        } else {
-          currentCash = [...(parsedData as CashTransaction[]), ...currentCash];
-        }
-
-        localStorage.setItem('admin_kelas_sd_v1_transactions', JSON.stringify(currentCash));
-        for (const c of parsedData) {
-          syncTransaction(c).catch(console.error);
-        }
+        bulkImportCash(parsedData as CashTransaction[], importMode);
       } else if (activeCategory === 'inventaris') {
-        const savedInv = localStorage.getItem('admin_kelas_sd_v1_inventory');
-        let currentInv: InventoryItem[] = savedInv ? JSON.parse(savedInv) : inventory;
-
-        if (importMode === 'replace') {
-          currentInv = parsedData as InventoryItem[];
-        } else {
-          const map = new Map<string, InventoryItem>();
-          currentInv.forEach(i => map.set(i.kodeBarang || i.id, i));
-          (parsedData as InventoryItem[]).forEach(i => map.set(i.kodeBarang || i.id, { ...(map.get(i.kodeBarang || i.id) || {}), ...i }));
-          currentInv = Array.from(map.values());
-        }
-
-        localStorage.setItem('admin_kelas_sd_v1_inventory', JSON.stringify(currentInv));
-        for (const i of parsedData) {
-          syncInventoryItem(i).catch(console.error);
-        }
+        bulkImportInventory(parsedData as InventoryItem[], importMode);
       }
 
       // Celebrate
@@ -887,6 +878,23 @@ export const ImportExcelView: React.FC = () => {
                           <th className="p-2.5">Kondisi</th>
                         </>
                       )}
+                      {activeCategory === 'presensi' && (
+                        <>
+                          <th className="p-2.5">Tanggal</th>
+                          <th className="p-2.5">Nama Siswa</th>
+                          <th className="p-2.5">Status</th>
+                          <th className="p-2.5">Keterangan</th>
+                        </>
+                      )}
+                      {activeCategory === 'jadwal' && (
+                        <>
+                          <th className="p-2.5">Hari</th>
+                          <th className="p-2.5 text-center">Jam Ke</th>
+                          <th className="p-2.5">Waktu</th>
+                          <th className="p-2.5">Mata Pelajaran</th>
+                          <th className="p-2.5">Guru Pengampu</th>
+                        </>
+                      )}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-600 dark:text-slate-300">
@@ -966,6 +974,34 @@ export const ImportExcelView: React.FC = () => {
                             <td className="p-2.5 font-bold">{row.namaBarang}</td>
                             <td className="p-2.5">{row.jumlah} {row.satuan}</td>
                             <td className="p-2.5">{row.kondisi}</td>
+                          </>
+                        )}
+                        {activeCategory === 'presensi' && (
+                          <>
+                            <td className="p-2.5 font-mono text-[11px]">{row.tanggal}</td>
+                            <td className="p-2.5 font-bold text-slate-800 dark:text-slate-100">
+                              {students.find(s => s.id === row.siswaId)?.nama || row.siswaId}
+                            </td>
+                            <td className="p-2.5">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                row.status === 'Hadir' ? 'bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300' :
+                                row.status === 'Sakit' ? 'bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300' :
+                                row.status === 'Izin' ? 'bg-blue-100 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300' :
+                                'bg-rose-100 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300'
+                              }`}>
+                                {row.status}
+                              </span>
+                            </td>
+                            <td className="p-2.5 text-[11px]">{row.keterangan || '-'}</td>
+                          </>
+                        )}
+                        {activeCategory === 'jadwal' && (
+                          <>
+                            <td className="p-2.5 font-bold text-slate-800 dark:text-slate-100">{row.hari}</td>
+                            <td className="p-2.5 text-center font-mono font-bold text-indigo-600 dark:text-indigo-400">JP {row.jamKe}</td>
+                            <td className="p-2.5 font-mono text-[11px]">{row.waktuMulai} - {row.waktuSelesai}</td>
+                            <td className="p-2.5 font-bold">{row.mataPelajaran}</td>
+                            <td className="p-2.5 text-[11px]">{row.guruPengampu || '-'}</td>
                           </>
                         )}
                       </tr>
