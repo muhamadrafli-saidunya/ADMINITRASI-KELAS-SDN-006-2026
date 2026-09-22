@@ -26,6 +26,7 @@ import {
   UserCheck,
   ArrowRight,
   Users,
+  Calendar,
   SlidersHorizontal,
   Database,
   FileJson,
@@ -663,6 +664,82 @@ export const PengaturanView: React.FC = () => {
                   onChange={e => setFormData({ ...formData, homeroomTeacherNip: e.target.value })}
                   className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-2.5 text-xs text-slate-800 dark:text-white focus:outline-none focus:border-blue-500 font-mono"
                 />
+              </div>
+
+              {/* Penanggalan / Titimangsa Rapor (Berlaku Semua Siswa) */}
+              <div className="sm:col-span-2 pt-3 border-t border-slate-200 dark:border-slate-700 space-y-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <Calendar className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                    <span className="text-xs font-extrabold text-slate-900 dark:text-white">
+                      Penanggalan / Titimangsa Rapor (Berlaku Serentak untuk Seluruh Siswa)
+                    </span>
+                  </div>
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10.5px] font-bold bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-200">
+                    <Users className="h-3 w-3" />
+                    <span>Semua Siswa</span>
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="p-3.5 rounded-xl border border-blue-100 dark:border-blue-900/40 bg-blue-50/30 dark:bg-blue-950/20 space-y-2">
+                    <label className="block text-xs font-bold text-slate-800 dark:text-slate-200">
+                      Rapor Akhir Semester (SAS / Kenaikan Kelas):
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.tanggalRapor || ''}
+                      onChange={e => setFormData({ ...formData, tanggalRapor: e.target.value })}
+                      placeholder={`Contoh: ${formData.city || 'Kota Jakarta Selatan'}, 20 Juni 2027`}
+                      className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-xs font-semibold text-slate-800 dark:text-white focus:outline-none focus:border-blue-500"
+                    />
+                    <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setFormData({ ...formData, tanggalRapor: `${formData.city || 'Kota Jakarta Selatan'}, 20 Juni 2027` })}
+                        className="text-[10px] px-2 py-0.5 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:text-blue-600"
+                      >
+                        Smt 2 (20 Juni 2027)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFormData({ ...formData, tanggalRapor: `${formData.city || 'Kota Jakarta Selatan'}, 19 Desember 2026` })}
+                        className="text-[10px] px-2 py-0.5 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:text-blue-600"
+                      >
+                        Smt 1 (19 Des 2026)
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl border border-amber-100 dark:border-amber-900/40 bg-amber-50/30 dark:bg-amber-950/20 space-y-2">
+                    <label className="block text-xs font-bold text-slate-800 dark:text-slate-200">
+                      Rapor Tengah Semester (STS):
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.tanggalRaporMid || ''}
+                      onChange={e => setFormData({ ...formData, tanggalRaporMid: e.target.value })}
+                      placeholder={`Contoh: ${formData.city || 'Kota Jakarta Selatan'}, 10 Oktober 2026`}
+                      className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-xs font-semibold text-slate-800 dark:text-white focus:outline-none focus:border-amber-500"
+                    />
+                    <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setFormData({ ...formData, tanggalRaporMid: `${formData.city || 'Kota Jakarta Selatan'}, 28 Maret 2027` })}
+                        className="text-[10px] px-2 py-0.5 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:text-amber-600"
+                      >
+                        Mid Smt 2 (28 Maret 2027)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFormData({ ...formData, tanggalRaporMid: `${formData.city || 'Kota Jakarta Selatan'}, 10 Oktober 2026` })}
+                        className="text-[10px] px-2 py-0.5 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:text-amber-600"
+                      >
+                        Mid Smt 1 (10 Okt 2026)
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 

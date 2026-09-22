@@ -6,6 +6,7 @@ import { RekapLegerRaporTab } from './RekapLegerRaporTab';
 import { SampulBiodataTab } from './SampulBiodataTab';
 import { StudentReportCardSheet, PrintSettings } from './StudentReportCardSheet';
 import { ModalCetakMassalRapor } from './ModalCetakMassalRapor';
+import { ModalTitimangsaRapor } from './ModalTitimangsaRapor';
 import { KurikulumFaseSelectorModal } from '../common/KurikulumFaseSelectorModal';
 import {
   FileSpreadsheet,
@@ -56,6 +57,7 @@ export const RaportView: React.FC = () => {
   const [isEditModalOpen, setIsEditModalOpen] = useState<boolean>(false);
   const [isBatchModalOpen, setIsBatchModalOpen] = useState<boolean>(false);
   const [isPhaseModalOpen, setIsPhaseModalOpen] = useState<boolean>(false);
+  const [isTitimangsaModalOpen, setIsTitimangsaModalOpen] = useState<boolean>(false);
   const [batchPrintStudents, setBatchPrintStudents] = useState<Student[] | null>(null);
 
   // Print settings
@@ -246,8 +248,27 @@ export const RaportView: React.FC = () => {
           <span>Rekap Leger & Ranking Se-Kelas</span>
         </button>
 
-        {/* Quick Phase Synchronizer Trigger */}
-        <div className="ml-auto flex items-center gap-2">
+        {/* Quick Phase & Titimangsa Global Synchronizer Triggers */}
+        <div className="ml-auto flex items-center gap-2 flex-wrap">
+          <button
+            id="btn-open-titimangsa-header"
+            type="button"
+            onClick={() => setIsTitimangsaModalOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50/70 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-xs font-bold hover:bg-blue-100 dark:hover:bg-blue-900/60 transition-all shadow-xs active:scale-95 cursor-pointer"
+            title="Atur penanggalan rapor yang berlaku serentak untuk seluruh siswa"
+          >
+            <Calendar className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+            <span className="hidden sm:inline">Titimangsa:</span>
+            <span className="font-extrabold max-w-[130px] truncate">
+              {isMidSemester
+                ? (schoolInfo.tanggalRaporMid || 'Mid Smt')
+                : (schoolInfo.tanggalRapor || 'Akhir Smt')}
+            </span>
+            <span className="px-1.5 py-0.2 rounded-full text-[9px] font-extrabold bg-blue-200/80 dark:bg-blue-800 text-blue-900 dark:text-blue-100">
+              Semua
+            </span>
+          </button>
+
           <button
             type="button"
             onClick={() => setIsPhaseModalOpen(true)}
@@ -458,6 +479,17 @@ export const RaportView: React.FC = () => {
                 >
                   <Layers className="h-4 w-4" />
                   <span>Cetak Massal Seluruh Kelas</span>
+                </button>
+
+                <button
+                  id="btn-open-titimangsa-bar"
+                  type="button"
+                  onClick={() => setIsTitimangsaModalOpen(true)}
+                  className="flex items-center gap-1.5 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 px-3 py-2 text-xs font-bold text-blue-800 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/50 active:scale-95 transition-all cursor-pointer"
+                  title="Atur tempat dan tanggal pengesahan rapor serentak untuk seluruh siswa"
+                >
+                  <Calendar className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                  <span>Titimangsa (Semua Siswa)</span>
                 </button>
 
                 <button
@@ -1033,6 +1065,12 @@ export const RaportView: React.FC = () => {
           defaultSettings={printSettings}
         />
       )}
+
+      {/* Modal Titimangsa / Penanggalan Rapor Semua Siswa */}
+      <ModalTitimangsaRapor
+        isOpen={isTitimangsaModalOpen}
+        onClose={() => setIsTitimangsaModalOpen(false)}
+      />
 
       {/* Modal Sinkronisasi Fase Kurikulum Merdeka */}
       <KurikulumFaseSelectorModal

@@ -21,7 +21,8 @@ import {
   MessageSquare,
   UserCheck,
   CalendarCheck,
-  Edit3
+  Edit3,
+  Users
 } from 'lucide-react';
 
 interface ModalEditRaporSiswaProps {
@@ -134,8 +135,8 @@ export const ModalEditRaporSiswa: React.FC<ModalEditRaporSiswaProps> = ({
         current.catatanWaliKelasMid ||
         `"Ananda ${student.nama} menunjukkan kesungguhan dan keaktifan belajar yang sangat baik hingga tengah semester ini. Pertahankan ketekunan belajarmu dan terus kembangkan potensimu pada paruh semester kedua."`
       );
-      setTempatTanggalRapor(current.tempatTanggalRapor || `${schoolInfo.city}, 20 Juni 2027`);
-      setTempatTanggalRaporMid(current.tempatTanggalRaporMid || defaultMidTanggal);
+      setTempatTanggalRapor(schoolInfo.tanggalRapor || current.tempatTanggalRapor || `${schoolInfo.city}, 20 Juni 2027`);
+      setTempatTanggalRaporMid(schoolInfo.tanggalRaporMid || current.tempatTanggalRaporMid || defaultMidTanggal);
       setShowRanking(current.showRanking !== false);
       setShowMidDeskripsi(current.showMidDeskripsi !== false);
       setShowKenaikan(current.showKenaikan !== false);
@@ -904,22 +905,33 @@ export const ModalEditRaporSiswa: React.FC<ModalEditRaporSiswaProps> = ({
               </div>
 
               {/* SECTION 7: TANGGAL PENGESAHAN AKHIR SEMESTER */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1 flex items-center gap-1.5">
-                    <Calendar className="h-3.5 w-3.5 text-slate-400" />
-                    <span>7. Tempat & Tanggal Pengesahan Rapor Akhir Semester:</span>
+              <div className="rounded-xl border border-blue-100 dark:border-blue-900/40 bg-blue-50/40 dark:bg-blue-950/20 p-3.5 space-y-2">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <label className="block text-[11px] font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                    <Calendar className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                    <span>7. Tempat & Tanggal Pengesahan Rapor Akhir Semester (SAS):</span>
                   </label>
-                  <input
-                    type="text"
-                    value={tempatTanggalRapor}
-                    onChange={e => setTempatTanggalRapor(e.target.value)}
-                    placeholder="Contoh: Jakarta, 20 Juni 2027"
-                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-800 dark:text-white outline-none"
-                  />
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-200">
+                    <Users className="h-3 w-3" />
+                    <span>Berlaku untuk Seluruh Siswa</span>
+                  </span>
                 </div>
-                <div className="flex items-center text-[11px] text-slate-500 dark:text-slate-400 pt-5">
-                  <span>Wali Kelas: <strong>{schoolInfo.homeroomTeacherName}</strong></span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <input
+                      type="text"
+                      value={tempatTanggalRapor}
+                      onChange={e => setTempatTanggalRapor(e.target.value)}
+                      placeholder="Contoh: Jakarta, 20 Juni 2027"
+                      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-900 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-800 dark:text-white outline-none"
+                    />
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
+                      Perubahan tanggal di sini otomatis disinkronkan ke seluruh {students.length} lembar rapor siswa.
+                    </p>
+                  </div>
+                  <div className="flex items-center text-[11px] text-slate-500 dark:text-slate-400">
+                    <span>Wali Kelas: <strong>{schoolInfo.homeroomTeacherName}</strong></span>
+                  </div>
                 </div>
               </div>
             </>
@@ -1267,22 +1279,33 @@ export const ModalEditRaporSiswa: React.FC<ModalEditRaporSiswaProps> = ({
               </div>
 
               {/* SECTION 4: TANGGAL PENGESAHAN MID SEMESTER */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1 flex items-center gap-1.5">
+              <div className="rounded-xl border border-amber-100 dark:border-amber-900/40 bg-amber-50/40 dark:bg-amber-950/20 p-3.5 space-y-2">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <label className="block text-[11px] font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
                     <Calendar className="h-3.5 w-3.5 text-amber-500" />
-                    <span>Tempat & Tanggal Pengesahan Rapor Mid Semester:</span>
+                    <span>Tempat & Tanggal Pengesahan Rapor Mid Semester (STS):</span>
                   </label>
-                  <input
-                    type="text"
-                    value={tempatTanggalRaporMid}
-                    onChange={e => setTempatTanggalRaporMid(e.target.value)}
-                    placeholder="Contoh: Jakarta, 10 Oktober 2026"
-                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 dark:border-slate-700 dark:bg-slate-800 dark:text-white outline-none"
-                  />
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-200">
+                    <Users className="h-3 w-3" />
+                    <span>Berlaku untuk Seluruh Siswa</span>
+                  </span>
                 </div>
-                <div className="flex items-center text-[11px] text-slate-500 dark:text-slate-400 pt-5">
-                  <span>Wali Kelas: <strong>{schoolInfo.homeroomTeacherName}</strong></span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <input
+                      type="text"
+                      value={tempatTanggalRaporMid}
+                      onChange={e => setTempatTanggalRaporMid(e.target.value)}
+                      placeholder="Contoh: Jakarta, 10 Oktober 2026"
+                      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-900 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 dark:border-slate-700 dark:bg-slate-800 dark:text-white outline-none"
+                    />
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
+                      Perubahan tanggal di sini otomatis disinkronkan ke seluruh {students.length} lembar rapor siswa.
+                    </p>
+                  </div>
+                  <div className="flex items-center text-[11px] text-slate-500 dark:text-slate-400">
+                    <span>Wali Kelas: <strong>{schoolInfo.homeroomTeacherName}</strong></span>
+                  </div>
                 </div>
               </div>
             </>

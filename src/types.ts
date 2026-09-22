@@ -52,6 +52,10 @@ export interface SchoolInfo {
   effectiveDaysPerWeek?: 5 | 6 | number; // 5 atau 6 hari kerja/sekolah per minggu
   activeSchoolDays?: string[]; // e.g. ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat']
 
+  // Penanggalan / Titimangsa Rapor (Berlaku untuk semua siswa)
+  tanggalRapor?: string; // Tempat & tanggal pengesahan rapor akhir semester berlaku untuk semua siswa (misal: "Jakarta, 20 Juni 2027")
+  tanggalRaporMid?: string; // Tempat & tanggal pengesahan rapor tengah semester berlaku untuk semua siswa (misal: "Jakarta, 10 Oktober 2026")
+
   // Logo & Kop Surat Configuration
   logoLeft?: string; // Base64 data URL or Image URL
   logoLeftPreset?: string; // 'tutwuri' | 'kemdikbud' | 'kemenag' | 'garuda' | 'pemda_dki' | 'pemda_jabar' | 'pemda_jateng' | 'pemda_jatim' | 'sd_nasional' | 'custom'

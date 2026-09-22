@@ -966,8 +966,8 @@ export const StudentReportCardSheet: React.FC<StudentReportCardSheetProps> = ({
               <div>
                 <p className="text-slate-700 print:text-black">
                   {isMidSemester
-                    ? (reportData.tempatTanggalRaporMid || defaultMidTanggal)
-                    : (reportData.tempatTanggalRapor || `${schoolInfo.city}, 20 Juni 2027`)}
+                    ? (schoolInfo.tanggalRaporMid || reportData.tempatTanggalRaporMid || defaultMidTanggal)
+                    : (schoolInfo.tanggalRapor || reportData.tempatTanggalRapor || `${schoolInfo.city}, 20 Juni 2027`)}
                 </p>
                 <p className="font-bold text-black">Wali Kelas,</p>
                 <div className="h-16 sm:h-20 print:h-16" />

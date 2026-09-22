@@ -286,6 +286,8 @@ export const INITIAL_SCHOOL_INFO: SchoolInfo = {
   kurikulum: 'Kurikulum Merdeka Pembelajaran Mendalam (KMPM)',
   effectiveDaysPerWeek: 5,
   activeSchoolDays: ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat'],
+  tanggalRapor: 'Kota Jakarta Selatan, 20 Juni 2027',
+  tanggalRaporMid: 'Kota Jakarta Selatan, 28 Maret 2027',
 
   // Logo & Kop Surat Configuration
   logoLeft: '',

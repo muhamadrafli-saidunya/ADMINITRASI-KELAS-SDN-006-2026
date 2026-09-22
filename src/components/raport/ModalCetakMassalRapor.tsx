@@ -13,7 +13,9 @@ import {
   FileText,
   CheckCircle2,
   Info,
-  UserCheck
+  UserCheck,
+  Calendar,
+  Users
 } from 'lucide-react';
 
 interface ModalCetakMassalRaporProps {
@@ -29,7 +31,7 @@ export const ModalCetakMassalRapor: React.FC<ModalCetakMassalRaporProps> = ({
   onStartBatchPrint,
   defaultSettings
 }) => {
-  const { students, schoolInfo } = useApp();
+  const { students, schoolInfo, updateGlobalReportDate } = useApp();
 
   const [selectedIds, setSelectedIds] = useState<string[]>(students.map(s => s.id));
   const [sortBy, setSortBy] = useState<'absen' | 'nama' | 'nisn'>('absen');
@@ -38,6 +40,22 @@ export const ModalCetakMassalRapor: React.FC<ModalCetakMassalRaporProps> = ({
     parentSignatureChoice: defaultSettings?.parentSignatureChoice || 'ayah',
     showMidDeskripsi: defaultSettings?.showMidDeskripsi !== false
   });
+
+  const activeDefaultDate = settings.reportType === 'mid_semester'
+    ? (schoolInfo.tanggalRaporMid || `${schoolInfo.city || 'Kota Jakarta Selatan'}, 10 Oktober 2026`)
+    : (schoolInfo.tanggalRapor || `${schoolInfo.city || 'Kota Jakarta Selatan'}, 20 Juni 2027`);
+
+  const [customReportDate, setCustomReportDate] = useState<string>(activeDefaultDate);
+
+  // Sync date if report type toggled
+  const handleSelectReportType = (type: 'semester' | 'mid_semester') => {
+    setSettings({ ...settings, reportType: type });
+    if (type === 'mid_semester') {
+      setCustomReportDate(schoolInfo.tanggalRaporMid || `${schoolInfo.city || 'Kota Jakarta Selatan'}, 10 Oktober 2026`);
+    } else {
+      setCustomReportDate(schoolInfo.tanggalRapor || `${schoolInfo.city || 'Kota Jakarta Selatan'}, 20 Juni 2027`);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -73,6 +91,12 @@ export const ModalCetakMassalRapor: React.FC<ModalCetakMassalRaporProps> = ({
 
   const handleExecutePrint = () => {
     if (studentsToPrint.length === 0) return;
+    if (customReportDate.trim()) {
+      updateGlobalReportDate(
+        settings.reportType === 'mid_semester' ? 'mid' : 'semester',
+        customReportDate.trim()
+      );
+    }
     onStartBatchPrint(studentsToPrint, settings);
     onClose();
   };
@@ -130,7 +154,7 @@ export const ModalCetakMassalRapor: React.FC<ModalCetakMassalRaporProps> = ({
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
-                  onClick={() => setSettings({ ...settings, reportType: 'semester' })}
+                  onClick={() => handleSelectReportType('semester')}
                   className={`flex items-center justify-center gap-2 p-2 rounded-xl text-xs font-bold border transition-all ${
                     settings.reportType !== 'mid_semester'
                       ? 'border-blue-600 bg-blue-50 dark:bg-blue-950/60 text-blue-900 dark:text-blue-200 shadow-xs'
@@ -143,7 +167,7 @@ export const ModalCetakMassalRapor: React.FC<ModalCetakMassalRaporProps> = ({
 
                 <button
                   type="button"
-                  onClick={() => setSettings({ ...settings, reportType: 'mid_semester' })}
+                  onClick={() => handleSelectReportType('mid_semester')}
                   className={`flex items-center justify-center gap-2 p-2 rounded-xl text-xs font-bold border transition-all ${
                     settings.reportType === 'mid_semester'
                       ? 'border-amber-600 bg-amber-50 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 shadow-xs'
@@ -296,6 +320,29 @@ export const ModalCetakMassalRapor: React.FC<ModalCetakMassalRaporProps> = ({
                 </div>
               </div>
             )}
+
+            {/* Tempat & Tanggal Rapor (Titimangsa Cetak Massal - Berlaku untuk Seluruh Siswa) */}
+            <div className="pt-2.5 mt-2 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 p-3 rounded-xl space-y-2">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                  <Calendar className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                  <span>Tempat & Tanggal Pengesahan Rapor (Titimangsa):</span>
+                </span>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-200">
+                  <Users className="h-3 w-3" />
+                  <span>Berlaku Semua Siswa yang Dicetak</span>
+                </span>
+              </div>
+              <div>
+                <input
+                  type="text"
+                  value={customReportDate}
+                  onChange={e => setCustomReportDate(e.target.value)}
+                  placeholder="Contoh: Kota Jakarta Selatan, 20 Juni 2027"
+                  className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1.5 text-xs font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
           </div>
 
           {/* Student Selection List */}

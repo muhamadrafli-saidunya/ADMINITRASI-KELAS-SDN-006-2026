@@ -78,7 +78,8 @@ import {
   syncTransaction,
   syncInventoryItem,
   syncAttendance,
-  syncScheduleItem
+  syncScheduleItem,
+  syncSchoolInfo
 } from '../services/firestoreSync';
 
 export interface ToastMessage {
@@ -218,6 +219,12 @@ interface AppContextType {
   studentReports: Record<string, StudentReportData>;
   getStudentReport: (siswaId: string) => StudentReportData;
   updateStudentReport: (siswaId: string, updated: Partial<StudentReportData>, silent?: boolean) => void;
+  updateGlobalReportDate: (
+    type: 'semester' | 'mid_semester' | 'both',
+    dateSemester?: string,
+    dateMid?: string,
+    silent?: boolean
+  ) => void;
   getEffectiveStudentAttendance: (siswaId: string, isMidSemester?: boolean) => {
     sakit: number;
     izin: number;
@@ -435,10 +442,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const [schoolInfo, setSchoolInfo] = useState<SchoolInfo>(() => {
     const saved = getSaved('schoolInfo', INITIAL_SCHOOL_INFO);
-    if (!saved.kurikulum || saved.kurikulum === 'Kurikulum Merdeka') {
-      return { ...saved, kurikulum: 'Kurikulum Merdeka Pembelajaran Mendalam (KMPM)' };
+    const updated = { ...saved };
+    if (!updated.kurikulum || updated.kurikulum === 'Kurikulum Merdeka') {
+      updated.kurikulum = 'Kurikulum Merdeka Pembelajaran Mendalam (KMPM)';
     }
-    return saved;
+    if (!updated.tanggalRapor) {
+      updated.tanggalRapor = updated.semester?.includes('2')
+        ? `${updated.city || 'Kota Jakarta Selatan'}, 20 Juni 2027`
+        : `${updated.city || 'Kota Jakarta Selatan'}, 19 Desember 2026`;
+    }
+    if (!updated.tanggalRaporMid) {
+      updated.tanggalRaporMid = updated.semester?.includes('2')
+        ? `${updated.city || 'Kota Jakarta Selatan'}, 28 Maret 2027`
+        : `${updated.city || 'Kota Jakarta Selatan'}, 10 Oktober 2026`;
+    }
+    return updated;
   });
 
   const [students, setStudents] = useState<Student[]>(() => 
@@ -1117,8 +1135,65 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // School Info
   const updateSchoolInfo = (info: Partial<SchoolInfo>) => {
-    setSchoolInfo(prev => ({ ...prev, ...info }));
+    setSchoolInfo(prev => {
+      const merged = { ...prev, ...info };
+      // If tanggalRapor or tanggalRaporMid changed, also sync all student reports
+      if (info.tanggalRapor || info.tanggalRaporMid) {
+        setStudentReports(prevReports => {
+          const updatedReports: Record<string, StudentReportData> = {};
+          Object.keys(prevReports).forEach(id => {
+            updatedReports[id] = {
+              ...prevReports[id],
+              ...(info.tanggalRapor ? { tempatTanggalRapor: info.tanggalRapor } : {}),
+              ...(info.tanggalRaporMid ? { tempatTanggalRaporMid: info.tanggalRaporMid } : {})
+            };
+          });
+          localStorage.setItem(STORAGE_PREFIX + 'studentReports', JSON.stringify(updatedReports));
+          return updatedReports;
+        });
+      }
+      return merged;
+    });
     addToast('success', 'Berhasil', 'Informasi sekolah & kelas berhasil diperbarui');
+  };
+
+  const updateGlobalReportDate = (
+    type: 'semester' | 'mid_semester' | 'both',
+    dateSemester?: string,
+    dateMid?: string,
+    silent: boolean = false
+  ) => {
+    setSchoolInfo(prev => {
+      const nextInfo: SchoolInfo = {
+        ...prev,
+        ...(type === 'semester' || type === 'both' ? (dateSemester ? { tanggalRapor: dateSemester } : {}) : {}),
+        ...(type === 'mid_semester' || type === 'both' ? (dateMid ? { tanggalRaporMid: dateMid } : {}) : {})
+      };
+      localStorage.setItem(STORAGE_PREFIX + 'schoolInfo', JSON.stringify(nextInfo));
+      syncSchoolInfo(nextInfo).catch(err => console.warn('[Firestore] Sync schoolInfo warning:', err));
+      return nextInfo;
+    });
+
+    setStudentReports(prev => {
+      const updatedReports: Record<string, StudentReportData> = {};
+      Object.keys(prev).forEach(id => {
+        updatedReports[id] = {
+          ...prev[id],
+          ...(type === 'semester' || type === 'both' ? (dateSemester ? { tempatTanggalRapor: dateSemester } : {}) : {}),
+          ...(type === 'mid_semester' || type === 'both' ? (dateMid ? { tempatTanggalRaporMid: dateMid } : {}) : {})
+        };
+      });
+      localStorage.setItem(STORAGE_PREFIX + 'studentReports', JSON.stringify(updatedReports));
+      return updatedReports;
+    });
+
+    if (!silent) {
+      addToast(
+        'success',
+        'Penanggalan Rapor Disinkronkan',
+        'Titimangsa pengesahan rapor berhasil diperbarui dan diterapkan ke seluruh siswa.'
+      );
+    }
   };
 
   // Student CRUD
@@ -1925,8 +2000,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Raport Siswa, Ranking & Kenaikan Kelas
   const getStudentReport = (siswaId: string): StudentReportData => {
+    const defaultDateSemester = schoolInfo.tanggalRapor || (schoolInfo.semester?.includes('2') ? `${schoolInfo.city}, 20 Juni 2027` : `${schoolInfo.city}, 19 Desember 2026`);
+    const defaultDateMid = schoolInfo.tanggalRaporMid || (schoolInfo.semester?.includes('2') ? `${schoolInfo.city}, 28 Maret 2027` : `${schoolInfo.city}, 10 Oktober 2026`);
+
     if (studentReports && studentReports[siswaId]) {
-      return studentReports[siswaId];
+      const rep = studentReports[siswaId];
+      return {
+        ...rep,
+        tempatTanggalRapor: schoolInfo.tanggalRapor || rep.tempatTanggalRapor || defaultDateSemester,
+        tempatTanggalRaporMid: schoolInfo.tanggalRaporMid || rep.tempatTanggalRaporMid || defaultDateMid
+      };
     }
     const student = students.find(s => s.id === siswaId);
     const sGrades = getAllGradesForStudent(siswaId);
@@ -1960,8 +2043,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       catatanWaliKelasMid: `"Ananda ${student?.nama || 'siswa'} menunjukkan kesungguhan dan keaktifan belajar yang sangat baik hingga tengah semester ini. Pertahankan ketekunan belajarmu dan terus kembangkan potensimu pada paruh semester kedua."`,
       deskripsiKokurikuler: '',
       tanggapanOrangTua: '',
-      tempatTanggalRapor: `${schoolInfo.city}, 20 Juni 2027`,
-      tempatTanggalRaporMid: `${schoolInfo.city}, 10 Oktober 2026`,
+      tempatTanggalRapor: defaultDateSemester,
+      tempatTanggalRaporMid: defaultDateMid,
       showRanking: true,
       showKenaikan: true
     };
@@ -1970,14 +2053,55 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const updateStudentReport = (siswaId: string, updated: Partial<StudentReportData>, silent: boolean = false) => {
-    setStudentReports(prev => {
-      const current = prev[siswaId] || getStudentReport(siswaId);
-      const merged = { ...current, ...updated };
-      return {
-        ...prev,
-        [siswaId]: merged
-      };
-    });
+    // If tempatTanggalRapor or tempatTanggalRaporMid is updated, apply globally to all students and schoolInfo!
+    if (updated.tempatTanggalRapor || updated.tempatTanggalRaporMid) {
+      setSchoolInfo(prev => {
+        const nextInfo = {
+          ...prev,
+          ...(updated.tempatTanggalRapor ? { tanggalRapor: updated.tempatTanggalRapor } : {}),
+          ...(updated.tempatTanggalRaporMid ? { tanggalRaporMid: updated.tempatTanggalRaporMid } : {})
+        };
+        localStorage.setItem(STORAGE_PREFIX + 'schoolInfo', JSON.stringify(nextInfo));
+        syncSchoolInfo(nextInfo).catch(err => console.warn('[Firestore] Sync schoolInfo warning:', err));
+        return nextInfo;
+      });
+
+      setStudentReports(prev => {
+        const current = prev[siswaId] || getStudentReport(siswaId);
+        const mergedCurrent = { ...current, ...updated };
+        const updatedReports: Record<string, StudentReportData> = {};
+
+        // Apply date changes to ALL students
+        Object.keys(prev).forEach(id => {
+          if (id === siswaId) {
+            updatedReports[id] = mergedCurrent;
+          } else {
+            updatedReports[id] = {
+              ...prev[id],
+              ...(updated.tempatTanggalRapor ? { tempatTanggalRapor: updated.tempatTanggalRapor } : {}),
+              ...(updated.tempatTanggalRaporMid ? { tempatTanggalRaporMid: updated.tempatTanggalRaporMid } : {})
+            };
+          }
+        });
+        if (!updatedReports[siswaId]) {
+          updatedReports[siswaId] = mergedCurrent;
+        }
+        localStorage.setItem(STORAGE_PREFIX + 'studentReports', JSON.stringify(updatedReports));
+        return updatedReports;
+      });
+    } else {
+      setStudentReports(prev => {
+        const current = prev[siswaId] || getStudentReport(siswaId);
+        const merged = { ...current, ...updated };
+        const nextReports = {
+          ...prev,
+          [siswaId]: merged
+        };
+        localStorage.setItem(STORAGE_PREFIX + 'studentReports', JSON.stringify(nextReports));
+        return nextReports;
+      });
+    }
+
     if (!silent) {
       addToast('success', 'Rapor Diperbarui', 'Data ranking, catatan, absensi & keputusan kenaikan kelas berhasil disimpan.');
     }
@@ -3070,6 +3194,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         studentReports,
         getStudentReport,
         updateStudentReport,
+        updateGlobalReportDate,
         getEffectiveStudentAttendance,
         updateStudentReportAttendance,
         bulkAutoCalculateRankings,
